@@ -28,6 +28,8 @@ class Settings(BaseSettings):
 
     cors_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    max_upload_bytes: int = 10 * 1024 * 1024
+
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/hive_inspect"
 
     gemini_api_key: str | None = None

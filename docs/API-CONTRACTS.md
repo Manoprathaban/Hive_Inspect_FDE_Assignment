@@ -792,15 +792,28 @@ The contract is implementable directly with FastAPI + Pydantic:
 - `GET /health` — operational probe only (`backend/app/api/routes/health.py`).
 - Domain/protocol foundations: `TemplateRepository`, `TemplateImporter`,
   `AuthenticationProvider`, import use case, mock importer, domain models.
-- No endpoint in this contract is wired yet.
+
+### IMPLEMENTED AGAINST THIS CONTRACT
+
+- `POST /api/templates/import` — full §9.3 pipeline: `multipart/form-data` `file`,
+  10 MiB cap, extension+content container validation (`415`/`413`), importer-driven
+  structure validation (`422 INVALID_XLSX`), atomic persist through an owner-scoped
+  repository (in-memory adapter for now; Postgres adapter later), `201 ImportResult`
+  with `Location`, and the §14 error envelope (including
+  `422 VALIDATION_ERROR` for a missing/malformed request body).
+- The error-envelope exception handlers and the bearer-auth dependency
+  (`AUTHENTICATION_REQUIRED`/`INVALID_TOKEN`) under the `/api` base path.
+- Domain ids/timestamps required by §13 (§27 issue 1 resolution) and the
+  `copied_from_id` field on `Template`.
+- The repository adapter situation: `insert`, `fetch`, `list`, and issue reads are
+  implemented; `update_*`/`duplicate`/`delete` land with their API phases (the in-memory
+  adapter raises `NotImplementedError` for them).
 
 ### CONTRACT DEFINED FOR NEXT IMPLEMENTATION (to be built against this contract)
 
-- `GET /templates`, `GET /templates/{id}`, `POST /templates/import`,
-  `POST /templates/{id}/duplicate`, the three PATCH endpoints,
-  `GET /templates/{id}/import-issues`.
-- The repository/use-case wiring that backs them.
-- File upload handling, error envelope, and the bearer-auth dependency.
+- `GET /templates`, `GET /templates/{id}`, `POST /templates/{id}/duplicate`, the three
+  PATCH endpoints, `GET /templates/{id}/import-issues`.
+- The Postgres repository adapter that backs them.
 
 > Nothing in this section is operational until the backend implementation phase lands.
 > This document freezes the target, it does not claim delivery.

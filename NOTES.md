@@ -62,9 +62,32 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   authentication protocol boundaries. Import-issue listing folded into `TemplateRepository`.
 - Decision log: `docs/DATABASE_DESIGN.md` supersedes the older `docs/schema.md` (deleted).
 
+## 2026-09-29 — Template import API
+
+- Implemented `POST /api/templates/import` against `docs/API-CONTRACTS.md` §9.3/§18:
+  contract routes mounted under the `/api` base path (`/health` stays at the root);
+  `multipart/form-data` `file` upload with a 10 MiB cap, extension+content container
+  validation (`413 FILE_TOO_LARGE` / `415 INVALID_FILE`), importer-driven structure
+  validation (`422 INVALID_XLSX` with the reason in `details`), atomic save of the
+  aggregate + its issues, `201 ImportResult` (template + issues newest-first) and
+  `Location: /api/templates/{id}`.
+- Added the §14 error envelope (single handler wiring for `ApiError`,
+  `RequestValidationError`, malformed-multipart 400 → `422 VALIDATION_ERROR`, and the
+  never-leaky `500 INTERNAL_ERROR`) plus the bearer-auth dependency
+  (`AUTHENTICATION_REQUIRED`/`INVALID_TOKEN`) using the dev auth provider.
+- Applied §27 consistency-issue 1: optional ids on every nested domain resource plus
+  `created_at`/`updated_at`/`copied_from_id` on `Template` (schema already had the columns).
+- Added `InMemoryTemplateRepository` (owner-scoped, assigns real ids/timestamps;
+  `update_*`/`duplicate`/`delete` raise `NotImplementedError` until their phases).
+  Added `max_upload_bytes` to settings and `python-multipart` to `requirements.txt`.
+- Schemathesis validated the OpenAPI schema against the running app; one residual finding
+  is the documented false positive for an empty `file` part (415 on a non-container, which
+  is the contract-mandated response — see `docs/API-CONTRACTS.md` §18).
+
 ## Open questions
 
-- Next phase: PostgreSQL repository adapter (SQLAlchemy/asyncpg) and Spectora importer
-  behind `TemplateRepository`/`TemplateImporter`; API routes that thread `UserContext.owner_id`.
+- Next phase: `GET /api/templates`, `GET /api/templates/{id}`, the three PATCH endpoints,
+  duplicate, and `GET /api/templates/{id}/import-issues`, backed by the Postgres repository
+  adapter (SQLAlchemy/asyncpg) implementing the same owner-scoped protocol.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs. a
   tool like Alembic/`supabase db push` — plain SQL chosen for now.
