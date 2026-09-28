@@ -557,6 +557,12 @@ The frontend renders the template and surfaces any non-empty `issues` immediatel
 | `DATABASE_CONFLICT` | 409 | Unavoidable unique/constraint conflict (rare; see §21) |
 | `INTERNAL_ERROR` | 500 | Unexpected failure; never leaks stack traces or internals |
 
+> `IMPORT_FAILED` was evaluated and intentionally **not** added: a fatal, understandable
+> failure is a specific, client-actionable code (`INVALID_FILE` / `INVALID_XLSX`), and an
+> unknown failure is `INTERNAL_ERROR`. A generic "import failed" bucket would give the
+> frontend nothing to branch on. Non-fatal import problems are **not errors** — they are
+> persisted `import_issues` and succeed with `201` (§18).
+
 401 responses to a token problem also set `WWW-Authenticate: Bearer`.
 
 ---
