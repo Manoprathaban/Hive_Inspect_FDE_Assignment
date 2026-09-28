@@ -1,0 +1,1 @@
+"""Service adapters (e.g. AI, file storage) — reserved for later phases."""

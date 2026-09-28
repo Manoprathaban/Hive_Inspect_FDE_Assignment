@@ -1,0 +1,1 @@
+"""Concrete importer adapters — one per supported source brand."""

@@ -1,0 +1,1 @@
+"""Protocol contracts for template persistence/repositories."""

@@ -1,0 +1,28 @@
+[project]
+name = "hive-inspect-backend"
+version = "0.1.0"
+description = "Hive Inspect Template Importer - modular FastAPI monolith (foundation phase)"
+requires-python = ">=3.13"
+license = { text = "UNLICENSED" }
+
+# Dependencies are managed in requirements.txt for deploy/CI simplicity.
+dependencies = []
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+exclude = [".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

@@ -1,0 +1,1 @@
+"""Request-scoped dependencies (FastAPI). Reserved for auth and DI wiring."""

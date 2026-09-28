@@ -1,0 +1,1 @@
+"""Middleware (FastAPI). Reserved for cross-cutting HTTP concerns."""
