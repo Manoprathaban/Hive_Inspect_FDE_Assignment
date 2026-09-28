@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from app.domain.models.template import TemplateImport
+from app.domain.models.template import Template
 from app.protocols.importers.template_importer import TemplateImporter
 
 __all__ = ["ImportTemplateUseCase"]
@@ -21,6 +21,6 @@ class ImportTemplateUseCase:
 
     importer: TemplateImporter
 
-    def execute(self, source: bytes, *, filename: str = "") -> TemplateImport:
-        """Import ``source`` bytes into a :class:`TemplateImport`."""
+    def execute(self, source: bytes, *, filename: str = "") -> Template:
+        """Import ``source`` bytes into a domain :class:`Template`."""
         return self.importer.import_template(source, filename=filename)

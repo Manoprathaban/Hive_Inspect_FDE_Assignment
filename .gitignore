@@ -33,3 +33,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 *.swp
+
+# ---- Assignment reference (internal only — do not publish) ----
+assignment.md

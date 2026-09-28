@@ -2,50 +2,39 @@
 
 Conventions for PostgreSQL schema migrations targeting **local PostgreSQL, Supabase, and CI**.
 
-> Status: **foundation only.** The template schema itself is intentionally deferred to a
-> later phase. This directory documents the convention that migrations must follow.
+## Files
+
+| Migration | Contents |
+| --- | --- |
+| `0001_create_template_schema.sql` | Types (enums), tables, constraints, indexes, `updated_at` trigger, guarded Supabase Auth→`public.users` sync trigger |
+| `0002_rls_policies.sql` | Row Level Security enablement + ownership policies (applies only when the `auth` schema exists; no-op on plain PostgreSQL) |
+
+Apply once, in order, to an empty database. Requires PostgreSQL ≥ 13 (`gen_random_uuid()` is
+built-in from 13). Future migrations continue the `NNNN_description.sql` sequence.
 
 ## Rules
 
-1. One file per migration, named with a zero-padded sequence:
-
-   ```
-   0001_create_template_schema.sql
-   0002_add_template_metadata.sql
-   ```
-
-2. Plain SQL only. No tool-specific syntax or secrets. Use the SQL dialect supported by
-   both local PostgreSQL and Supabase (RDS-compatible PostgreSQL).
-
-3. Idempotency/migration tracking:
-   - Prefer `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS`, or
-   - Track applied migrations in a `schema_migrations` table and apply in order.
-
-4. Schema `public` is available in all three environments. Name objects with a clear
-   prefix if they are specific to Hive Inspect (e.g. `hive_`).
+1. One file per migration, named with a zero-padded sequence: `0001_...`, `0002_...`.
+2. Plain SQL only — no tool-specific syntax, no secrets. Dialect must run on both local
+   PostgreSQL and Supabase PostgreSQL.
+3. Supabase-only pieces (RLS, `auth.users` sync) are guarded by an `auth`-schema check so
+   every migration is valid on plain local/CI PostgreSQL.
+4. Migrations are applied **once, in order, to an empty database** (the bootstrap path used
+   by local dev, Supabase, and CI). Never hand-edit a live database outside a migration.
 
 ## Applying migrations
 
-Because the files are plain SQL, the same commands apply everywhere:
-
-Local PostgreSQL:
-
 ```bash
+# local PostgreSQL / Supabase (connection string from the Supabase dashboard)
 psql "$DATABASE_URL" -f database/migrations/0001_create_template_schema.sql
+psql "$DATABASE_URL" -f database/migrations/0002_rls_policies.sql
 ```
 
-Supabase (via the connection string from the Supabase dashboard — either direct or
-connection pooler URL):
-
-```bash
-psql "$DATABASE_URL" -f database/migrations/0001_create_template_schema.sql
-# or, when the supabase CLI is available:
-supabase db push          # executes the files staged under supabase/migrations
-```
-
-CI/CD: run the same `psql -f` loop over `database/migrations/*.sql` in order against a
-temporary PostgreSQL service container (see `.github/workflows/ci.yml`).
+On Supabase you can also paste each file into the SQL editor. CI/CD runs the same
+`psql -f` loop over `database/migrations/*.sql` in numeric order against a temporary
+PostgreSQL service container.
 
 ## Seeds
 
 Fixture/minimal seed data is not implementation code; see `database/seed/README.md`.
+The only seed is the deterministic development identity (`database/seed/dev_auth.sql`).

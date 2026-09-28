@@ -1,16 +1,16 @@
 -- =============================================================================
 -- 0001_create_template_schema.sql
--- Hive Inspect Template Importer — initial schema.
+-- Hive Inspect Template Importer — initial schema (types, tables, constraints, indexes).
 --
--- Apply once, in order, to an empty database. The same file is used for:
+-- Apply once, in order, to an empty database. Deterministic and repeatable on a fresh
+-- database for:
 --   * local PostgreSQL
 --   * Supabase PostgreSQL
---   * CI (fresh postgres service container — see .github/workflows/ci.yml)
+--   * CI (fresh postgres container)
 --
--- Supabase-specific pieces (RLS policies, auth.users sync trigger) are guarded by
--- checks for the `auth` schema, so this migration is valid on plain PostgreSQL too.
--- On Supabase the backend uses a privileged DB role; user authorization is enforced
--- in the application layer, with RLS applied here as defense in depth.
+-- The Supabase Auth sync trigger below is guarded by a check for the `auth` schema, so
+-- this file is valid on plain PostgreSQL too. Row Level Security is the responsibility
+-- of 0002_rls_policies.sql; keep authorization policy statements out of this file.
 -- =============================================================================
 
 BEGIN;
@@ -26,12 +26,15 @@ CREATE TYPE issue_type AS ENUM ('SOURCE_DATA_MISSING', 'UNSUPPORTED_CONTENT', 'I
 CREATE TYPE issue_severity AS ENUM ('info', 'warning', 'error');
 
 -- -----------------------------------------------------------------------------
--- 2) users
+-- 2) users (identity anchor — NOT a profiles table)
 -- -----------------------------------------------------------------------------
 
--- Mirrors a Supabase Auth user (id = auth.users.id). In production rows are created
--- by the on_auth_user_created trigger below; in local dev a deterministic stub user
--- is seeded (database/seed/dev_auth.sql) to match the DevAuthProvider.
+-- Id equals a Supabase Auth user id (auth.users.id); there are no credentials or
+-- profile fields here. In production a row is created by the on_auth_user_created
+-- trigger below (Supabase Auth sign-up -> mirror). In local development a single
+-- deterministic stub user is seeded (database/seed/dev_auth.sql) that matches the
+-- DevAuthProvider identity. The application never authenticates against this table.
+
 CREATE TABLE users (
     id         uuid PRIMARY KEY,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -46,9 +49,9 @@ CREATE TABLE templates (
     id              uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_id        uuid NOT NULL REFERENCES users (id) ON DELETE CASCADE,
     name            text NOT NULL,
-    source          text NOT NULL,              -- source brand/format, e.g. 'spectora'
+    source          text NOT NULL,              -- importer brand/format, e.g. 'spectora'
     source_filename text,                       -- original uploaded/imported filename
-    copied_from_id  uuid REFERENCES templates (id) ON DELETE SET NULL,
+    copied_from_id  uuid REFERENCES templates (id) ON DELETE SET NULL,  -- provenance only
     created_at      timestamptz NOT NULL DEFAULT now(),
     updated_at      timestamptz NOT NULL DEFAULT now()
 );
@@ -61,7 +64,7 @@ CREATE TABLE sections (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     template_id   uuid NOT NULL REFERENCES templates (id) ON DELETE CASCADE,
     name          text NOT NULL,
-    display_order integer NOT NULL,
+    display_order integer NOT NULL CHECK (display_order >= 0),
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     UNIQUE (template_id, display_order)
@@ -75,7 +78,7 @@ CREATE TABLE items (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     section_id    uuid NOT NULL REFERENCES sections (id) ON DELETE CASCADE,
     name          text NOT NULL,
-    display_order integer NOT NULL,
+    display_order integer NOT NULL CHECK (display_order >= 0),
     created_at    timestamptz NOT NULL DEFAULT now(),
     updated_at    timestamptz NOT NULL DEFAULT now(),
     UNIQUE (section_id, display_order)
@@ -84,10 +87,11 @@ CREATE TABLE items (
 -- -----------------------------------------------------------------------------
 -- 6) comments
 -- -----------------------------------------------------------------------------
--- One row per comment. content is TEXT and MAY contain HTML/rich text (per-comment);
--- the template is NEVER stored as one opaque HTML blob. Fields map 1:1 to the
--- Spectora HTML-text export columns (see docs/schema.md). source_row keeps the
--- original spreadsheet row for preservation checks and import-issue correlation.
+-- One row per comment. content is TEXT: Spectora comment text may carry markup
+-- (XML-escaped in the export, decoded during import), so the column must be free-form
+-- text. The template is NEVER stored as one opaque HTML/JSON blob. Fields map to the
+-- Spectora HTML-text export columns (see docs/DATABASE_DESIGN.md). source_row keeps
+-- the original spreadsheet row for provenance and import-issue correlation.
 
 CREATE TABLE comments (
     id                uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -97,7 +101,7 @@ CREATE TABLE comments (
     comment_type      comment_type NOT NULL,
     category          smallint CHECK (category IN (-1, 0, 1)),   -- Spectora: -1 Low, 0 Med, 1 High
     answer_type       answer_type NOT NULL,
-    order_within_item integer NOT NULL DEFAULT 0 CHECK (order_within_item >= 0),
+    display_order     integer NOT NULL DEFAULT 0 CHECK (display_order >= 0),
     recommendation    text,
     default_value     text,
     default_value_2   text,
@@ -112,9 +116,9 @@ CREATE TABLE comments (
 -- -----------------------------------------------------------------------------
 -- 7) comment_options
 -- -----------------------------------------------------------------------------
--- Normalized child records for repeated-value columns. A single table with an
--- option_type discriminator covers both "Multiple Choice Options" and
--- "Unit Type Options" without separate tables.
+-- Normalized child records for repeated-value columns. One table with an option_type
+-- discriminator covers both "Multiple Choice Options" and "Unit Type Options" without
+-- separate tables. display_order preserves the source (comma-separated) order.
 
 CREATE TABLE comment_options (
     id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -128,8 +132,8 @@ CREATE TABLE comment_options (
 -- -----------------------------------------------------------------------------
 -- 8) import_issues
 -- -----------------------------------------------------------------------------
--- Persistent, user-visible record of content that was missing, unsupported, or
--- invalid during import. NOT a general logging table. issue_type distinguishes:
+-- Persistent, user-visible record of content that was missing, unsupported, or invalid
+-- during import. NOT a general logging table. issue_type distinguishes:
 --   SOURCE_DATA_MISSING  -> information was not present in the export
 --   UNSUPPORTED_CONTENT  -> information existed but could not be fully represented
 --   INVALID_SOURCE_DATA  -> malformed source data (optional third category)
@@ -172,19 +176,20 @@ CREATE TRIGGER comments_set_updated_at
 -- -----------------------------------------------------------------------------
 -- 10) Indexes
 -- -----------------------------------------------------------------------------
--- Only useful indexes. sections (template_id, display_order) and items
--- (section_id, display_order) are already covered by their UNIQUE constraints;
--- comment_options (comment_id, ...) is covered by its UNIQUE constraint.
+-- Only useful indexes. sections (template_id, display_order), items (section_id,
+-- display_order), and comment_options (comment_id, option_type, display_order) are
+-- already covered by their UNIQUE constraints. See docs/DATABASE_DESIGN.md for the
+-- rationale of each one.
 
 CREATE INDEX templates_owner_id_idx ON templates (owner_id);
-CREATE INDEX comments_item_order_idx ON comments (item_id, order_within_item);
+CREATE INDEX comments_item_order_idx ON comments (item_id, display_order);
 CREATE INDEX import_issues_template_id_idx ON import_issues (template_id);
 
 -- -----------------------------------------------------------------------------
 -- 11) Supabase Auth integration (guarded — applies only when `auth` schema exists)
 -- -----------------------------------------------------------------------------
 
--- Mirrors a newly created Supabase Auth user into public.users.
+-- Mirrors a newly created Supabase Auth user into public.users so FK integrity holds.
 CREATE OR REPLACE FUNCTION handle_new_user() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 BEGIN
@@ -201,51 +206,5 @@ BEGIN
     END IF;
 END
 $auth$;
-
--- -----------------------------------------------------------------------------
--- 12) Row Level Security (guard applied on Supabase; skipped on plain PostgreSQL)
--- -----------------------------------------------------------------------------
--- Defense in depth: the backend uses a privileged connection and enforces ownership
--- in the application layer. RLS keys off auth.uid() so any direct user-accesible
--- access is scoped to the authenticated user's own data.
-
-DO $rls$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_namespace WHERE nspname = 'auth') THEN
-
-        ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY users_self ON public.users USING (id = auth.uid()) WITH CHECK (id = auth.uid())';
-
-        ALTER TABLE public.templates ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY templates_owner_all ON public.templates USING (owner_id = auth.uid()) WITH CHECK (owner_id = auth.uid())';
-
-        ALTER TABLE public.sections ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY sections_owner_all ON public.sections
-                 USING (EXISTS (SELECT 1 FROM public.templates t WHERE t.id = sections.template_id AND t.owner_id = auth.uid()))
-                 WITH CHECK (EXISTS (SELECT 1 FROM public.templates t WHERE t.id = sections.template_id AND t.owner_id = auth.uid()))';
-
-        ALTER TABLE public.items ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY items_owner_all ON public.items
-                 USING (EXISTS (SELECT 1 FROM public.sections s JOIN public.templates t ON t.id = s.template_id WHERE s.id = items.section_id AND t.owner_id = auth.uid()))
-                 WITH CHECK (EXISTS (SELECT 1 FROM public.sections s JOIN public.templates t ON t.id = s.template_id WHERE s.id = items.section_id AND t.owner_id = auth.uid()))';
-
-        ALTER TABLE public.comments ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY comments_owner_all ON public.comments
-                 USING (EXISTS (SELECT 1 FROM public.items i JOIN public.sections s ON s.id = i.section_id JOIN public.templates t ON t.id = s.template_id WHERE i.id = comments.item_id AND t.owner_id = auth.uid()))
-                 WITH CHECK (EXISTS (SELECT 1 FROM public.items i JOIN public.sections s ON s.id = i.section_id JOIN public.templates t ON t.id = s.template_id WHERE i.id = comments.item_id AND t.owner_id = auth.uid()))';
-
-        ALTER TABLE public.comment_options ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY comment_options_owner_all ON public.comment_options
-                 USING (EXISTS (SELECT 1 FROM public.comments c JOIN public.items i ON i.id = c.item_id JOIN public.sections s ON s.id = i.section_id JOIN public.templates t ON t.id = s.template_id WHERE c.id = comment_options.comment_id AND t.owner_id = auth.uid()))
-                 WITH CHECK (EXISTS (SELECT 1 FROM public.comments c JOIN public.items i ON i.id = c.item_id JOIN public.sections s ON s.id = i.section_id JOIN public.templates t ON t.id = s.template_id WHERE c.id = comment_options.comment_id AND t.owner_id = auth.uid()))';
-
-        ALTER TABLE public.import_issues ENABLE ROW LEVEL SECURITY;
-        EXECUTE 'CREATE POLICY import_issues_owner_all ON public.import_issues
-                 USING (EXISTS (SELECT 1 FROM public.templates t WHERE t.id = import_issues.template_id AND t.owner_id = auth.uid()))
-                 WITH CHECK (EXISTS (SELECT 1 FROM public.templates t WHERE t.id = import_issues.template_id AND t.owner_id = auth.uid()))';
-
-    END IF;
-END
-$rls$;
 
 COMMIT;

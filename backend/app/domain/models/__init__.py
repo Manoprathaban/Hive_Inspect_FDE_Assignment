@@ -1,6 +1,8 @@
-"""Core domain models for template imports.
+"""Domain models.
 
-The exact template schema is intentionally deferred to a later phase. These minimal
-placeholders exist so the protocol contracts (``app.protocols``) have concrete shapes to
-agree on. Keep this package free of framework and I/O imports.
+- ``template.py``: the full template aggregate (Template/Section/Item/Comment/
+  CommentOption/ImportIssue), its summary form (TemplateSummary), and its enums.
+- ``user.py``: :class:`UserContext` — the authenticated identity application code sees.
+
+No framework, database, or importer dependencies.
 """
