@@ -355,6 +355,16 @@ one thing that would have cost real marks, so it is worth recording what was che
   like the original had been mutated. The database showed distinct section ids and
   untouched original content — copy independence was never broken. Restored the section
   name afterwards, so the seeded template is in its as-imported state.
+- **Proved the importer works beyond the one committed template.** The brief says "We may
+  try another export in the same HTML-text format", and until now every importer test ran
+  against the same InterNACHI file, so the honest limitation was "verified on one export
+  only". Added `sample-data/commercial-rental.xml` — a synthetic export in the identical
+  SpreadsheetML format, but structurally unlike the canonical one: 12 columns instead of
+  42 (every optional column the importer models is absent), a different template, and one
+  extra column the importer has no home for. It imports correctly, which is the evidence
+  that the mapping is header-driven rather than tuned to InterNACHI. It also carries four
+  dirty values that each surface as an issue instead of being silently coerced. Six new
+  `test_second_export_*` tests pin all of it.
 - **Confirmed the reviewer's artifacts are present and correct:** the real Spectora
   InterNACHI Residential export is committed at `sample-data/sheet1.xml` (338 KB) with
   provenance in `sample-data/README.md`; `assignment.md` is correctly *not* tracked
@@ -367,8 +377,10 @@ one thing that would have cost real marks, so it is worth recording what was che
   that `sample-data/sheet1.xml` uses, i.e. a single worksheet whose row 1 is a header
   describing each column. The importer is column-driven, not template-driven: it maps by
   header name, so a different Spectora template in the same format works without code
-  changes. Verified against the canonical export only — no second vendor export was
-  available to test with.
+  changes. Evidenced twice — the canonical InterNACHI export, and
+  `sample-data/commercial-rental.xml`, a deliberately different 12-column export that omits
+  every optional column the importer models. No *real* second vendor export was available to
+  test with, so the second fixture is synthetic.
 - **Preserved:** section/item/comment text, the full hierarchy, explicit ordering, comment
   options, and per-row source references.
 - **Deliberate limits:** the worksheet format only (not the plain-text or XLSX exports);
