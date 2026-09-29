@@ -14,7 +14,11 @@ Render blueprint (`render.yaml`) is intentionally **not** added yet — it can b
 later from the Render dashboard. Required env vars when it is:
 
 - `DATABASE_URL` (Supabase PostgreSQL connection string)
-- `CORS_ORIGINS` (comma-separated frontend origins)
+- `CORS_ORIGINS` (comma-separated frontend origins). The built-in default covers local
+  development only — `http://localhost:5173` (Vite dev), `http://localhost:4173`
+  (`npm run preview`, i.e. the production build) and `http://localhost:3000`. In a
+  deployment it must contain the exact frontend origin, e.g.
+  `CORS_ORIGINS=https://<app>.vercel.app`, or every browser call is blocked by CORS.
 - `APP_ENV=production`
 - `GEMINI_API_KEY` only if/when AI is used
 
@@ -23,6 +27,10 @@ later from the Render dashboard. Required env vars when it is:
 - Framework preset: Vite. Build output: `dist/`.
 - Env vars (public only): `VITE_API_BASE_URL` → the Render service URL.
 - Never put secrets in frontend env vars — the browser ships them to clients.
+- Real Supabase sign-in additionally needs `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_ANON_KEY` (the public anon key). Without them the app runs on the
+  development session, which the production backend rejects — see `docs/FRONTEND_DESIGN.md`
+  §7 and §32.
 
 ## Database — Supabase
 
