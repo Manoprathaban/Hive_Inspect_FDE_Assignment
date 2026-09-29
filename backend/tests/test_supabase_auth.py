@@ -68,11 +68,13 @@ def test_provider_satisfies_protocol() -> None:
     assert isinstance(SupabaseAuthProvider(jwt_secret=SECRET), AuthenticationProvider)
 
 
-def test_provider_without_a_secret_fails_closed() -> None:
-    with pytest.raises(ValueError, match="SUPABASE_JWT_SECRET"):
-        SupabaseAuthProvider(jwt_secret="")
-    with pytest.raises(ValueError):
-        SupabaseAuthProvider(jwt_secret=None)  # type: ignore[arg-type]
+def test_provider_without_a_secret_fails_closed_for_hs256() -> None:
+    async def _run() -> None:
+        provider = SupabaseAuthProvider(jwt_secret=None)
+        await provider.get_current_user(token=_mint())
+
+    with pytest.raises(jwt.InvalidTokenError, match="SUPABASE_JWT_SECRET required"):
+        asyncio.run(_run())
 
 
 def test_provider_accepts_valid_access_token() -> None:

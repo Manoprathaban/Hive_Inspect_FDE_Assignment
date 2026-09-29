@@ -43,7 +43,7 @@ def get_auth_provider() -> AuthenticationProvider:
     settings = get_settings()
     if settings.app_env == "production":
         return SupabaseAuthProvider(
-            jwt_secret=settings.supabase_jwt_secret or "",
+            jwt_secret=settings.supabase_jwt_secret,
             supabase_url=settings.supabase_url,
         )
     return DevAuthProvider()

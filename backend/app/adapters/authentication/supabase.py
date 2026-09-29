@@ -38,9 +38,7 @@ _SUPABASE_ISSUER_PATH = "/auth/v1"
 class SupabaseAuthProvider:
     """Authenticate users by verifying their Supabase Auth access token."""
 
-    def __init__(self, *, jwt_secret: str, supabase_url: str | None = None) -> None:
-        if not jwt_secret:
-            raise ValueError("SUPABASE_JWT_SECRET is required to construct SupabaseAuthProvider")
+    def __init__(self, *, jwt_secret: str | None = None, supabase_url: str | None = None) -> None:
         self._jwt_secret = jwt_secret
         if supabase_url:
             self._issuer = f"{supabase_url.rstrip('/')}{_SUPABASE_ISSUER_PATH}"
@@ -83,6 +81,8 @@ class SupabaseAuthProvider:
                 signing_key = jwks_client.get_signing_key_from_jwt(token)
                 key = signing_key.key
             else:
+                if not self._jwt_secret:
+                    raise jwt.InvalidTokenError("SUPABASE_JWT_SECRET required for HS256")
                 key = self._jwt_secret
 
             payload = jwt.decode(
