@@ -44,8 +44,10 @@ class SupabaseAuthProvider:
         self._jwt_secret = jwt_secret
         if supabase_url:
             self._issuer = f"{supabase_url.rstrip('/')}{_SUPABASE_ISSUER_PATH}"
+            self._jwks_client = jwt.PyJWKClient(f"{self._issuer}/.well-known/jwks.json")
         else:
             self._issuer = None
+            self._jwks_client = None
 
     async def get_current_user(self, token: str) -> UserContext:
         claims = self._decode(token)
@@ -64,10 +66,20 @@ class SupabaseAuthProvider:
     def _decode(self, token: str) -> dict:
         """Verify signature, expiration, audience, and (when configured) issuer."""
         try:
+            unverified_header = jwt.get_unverified_header(token)
+            alg = unverified_header.get("alg", "HS256")
+
+            if alg == "RS256" and self._jwks_client:
+                signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+                key = signing_key.key
+            else:
+                key = self._jwt_secret
+                alg = "HS256"
+
             payload = jwt.decode(
                 token,
-                self._jwt_secret,
-                algorithms=["HS256"],
+                key,
+                algorithms=[alg],
                 audience="authenticated",
                 issuer=self._issuer,
                 options={"require": ["exp", "sub", "aud", "role"]},
