@@ -8,9 +8,10 @@ the assignment's *schema/database foundation* step only.
 - Seed: `database/seed/dev_auth.sql`
 - Domain/protocol code: `backend/app/domain/`, `backend/app/protocols/`
 
-> **Validation status:** no PostgreSQL/Supabase instance was available in this environment,
-> so migrations and RLS were validated **statically** (PostgreSQL grammar parse via
-> `pglast`). They were not executed against a live database; see §17.
+> **Validation status:** migrations and RLS were validated statically (PostgreSQL grammar
+> parse via `pglast`) and then executed against a live local PostgreSQL instance: schema,
+> FKs, cascades, triggers, seeds, and RLS cross-user checks are exercised by the harness in
+> `database/tests` (`make db-test`), which runs in CI; see §17.
 
 ---
 
@@ -431,12 +432,20 @@ See the FK table in §4. Summary of decisions:
 
 See §5. Boundary contracts in code:
 
-- Protocol: `app/protocols/authentication.py` → `AuthenticationProvider.get_current_user() -> UserContext`.
+- Protocol: `app/protocols/authentication.py` →
+  `AuthenticationProvider.get_current_user(token: str) -> UserContext`. The API layer
+  strips the `Bearer` scheme and hands every provider the raw token; the provider attests
+  the identity. The development stub ignores the value; the production provider validates
+  it against Supabase Auth.
 - Domain: `app/domain/models/user.py` → `UserContext(user_id, provider, email=None)`.
-- Production adapter: `app/adapters/authentication/supabase.py` (stub, fails closed; JWT
-  wiring lands in the auth/API step).
+- Production adapter: `app/adapters/authentication/supabase.py` → HS256 verification of
+  the Supabase access token with `SUPABASE_JWT_SECRET`; requires `aud` **and** `role` to
+  be `authenticated` (rejects `anon`/`service_role` API keys), `sub` a UUID (→
+  `UserContext.user_id`), and `exp`/signature valid; optional `iss` check from
+  `SUPABASE_URL`. Fails closed when the secret is not configured. Activated when
+  `APP_ENV=production`.
 - Development adapter: `app/adapters/authentication/dev.py` → deterministic
-  `00000000-0000-0000-0000-000000000001`.
+  `00000000-0000-0000-0000-000000000001` (header required, value ignored).
 - Repository boundary: `app/protocols/repositories/template_repository.py` — every method
   takes `owner_id`, so application services cannot omit authorization anywhere.
 - Import-issue access is folded into `TemplateRepository.list_import_issues` (one small
@@ -557,18 +566,24 @@ trace.
 - **Secrets:** none in migrations, seeds, or source. `SUPABASE_URL`/service-role key live
   only in backend environment variables, and the service-role key is never shipped to the
   frontend. The frontend gets only owner-scoped data through the API.
-- **Validation performed:** static (pglast) only — no live database for cross-user
-  SELECT/UPDATE/DELETE/INSERT rejection checks or cascade verification.
+- **API-key JWT confusion:** Supabase signs access tokens **and** the `anon`/`service_role`
+  API keys with the same JWT secret, so signature checks alone cannot authenticate a user.
+  `SupabaseAuthProvider` therefore also requires `aud` and `role` to both be
+  `authenticated` — an `anon` or `service_role` key is rejected as `401 INVALID_TOKEN`.
+  `SUPABASE_JWT_SECRET` is read from the environment only and is never logged or exposed.
+  (See also §14 and `docs/API-CONTRACTS.md` §4.)
+- **Validation performed:** static (pglast) plus a live Postgres harness in
+  `database/tests` for cross-user SELECT/UPDATE/DELETE/INSERT rejection checks and
+  cascade/trigger verification (executed against the project's local Postgres instance
+  and in CI; assignment-copy fallbacks documented in §17).
 
 ---
 
 ## 19. Intentionally NOT implemented yet
 
 - Spectora XLSX importer, Excel/HTML parsing, import UI, and template editor UI.
-- REST API routes, auth UI/login screens (the provider boundary and dev stub exist).
-- Full `SupabaseAuthProvider` JWT validation (stub fails closed).
-- The PostgreSQL repository adapter (SQLAlchemy/asyncpg) implementing `TemplateRepository`
-  (schema + contract exist; adapter is the next step).
+- REST API routes, auth UI/login screens (the provider boundary, JWT validation, and dev
+  stub exist; the frontend login flow is the remaining piece).
 - AI/Gemini, reporting, inspections, scheduling, customers, properties, payments,
   notifications, analytics, caching infrastructure, microservices.
 

@@ -87,6 +87,13 @@ Application use case / repository (authorization scoping)
 - **Identity model:** the authenticated user's `user_id` maps 1:1 to
   `templates.owner_id`. `auth.users.id` == `public.users.id` in production (mirror
   trigger in migration `0001`).
+- **Token verification** (`SupabaseAuthProvider`, active when `APP_ENV=production`):
+  HS256 signature against the project's `SUPABASE_JWT_SECRET`; `exp` (required, enforced);
+  `aud` and `role` must both be `authenticated` — the `anon`/`service_role` API keys are
+  also valid HS256 JWTs signed with the same secret, so they are explicitly rejected, never
+  treated as a logged-in user; `sub` (the `auth.users` id) must be a UUID and becomes
+  `UserContext.user_id`. When `SUPABASE_URL` is configured the `iss` claim
+  (`<url>/auth/v1`) is verified too. The provider fails closed if the secret is missing.
 - **Missing token:** `401 AUTHENTICATION_REQUIRED`.
 - **Invalid token:** `401 INVALID_TOKEN`. **Expired token:** `401 INVALID_TOKEN` — the API
   does not distinguish invalid from expired responses (no extra information leak, and the
@@ -97,9 +104,10 @@ Application use case / repository (authorization scoping)
 
 When the backend runs in `APP_ENV=development`, the existing `DevAuthProvider` resolves
 every request to a single deterministic user
-(`00000000-0000-0000-0000-000000000001`, seeded by `database/seed/dev_auth.sql`). In
-development the `Authorization` header is optional and, if present, its value is ignored —
-the caller is always the dev user.
+(`00000000-0000-0000-0000-000000000001`, seeded by `database/seed/dev_auth.sql`). The
+`Authorization` header stays required (a missing header is `401 AUTHENTICATION_REQUIRED`,
+exactly as in production) but in development its value is ignored — the caller is always
+the dev user.
 
 > The development path must never be reachable in production. The production path must
 > never accept an identity supplied by the client.
@@ -131,7 +139,7 @@ the caller is always the dev user.
 
 | Header | Required | Value | Notes |
 | --- | --- | --- | --- |
-| `Authorization` | Yes (except `/health`, dev) | `Bearer <JWT>` | Production: Supabase Auth JWT. Development: optional/ignored (§4). |
+| `Authorization` | Yes (except `/health`) | `Bearer <JWT>` | Production: Supabase Auth JWT (verified, §4). Development: required but value ignored. |
 | `Content-Type` | For requests with a body | `application/json` | Except `POST /api/templates/import` which uses `multipart/form-data`. |
 | `Accept` | No | `application/json` | All responses are JSON. |
 
@@ -792,18 +800,58 @@ The contract is implementable directly with FastAPI + Pydantic:
 - `GET /health` — operational probe only (`backend/app/api/routes/health.py`).
 - Domain/protocol foundations: `TemplateRepository`, `TemplateImporter`,
   `AuthenticationProvider`, import use case, mock importer, domain models.
-- No endpoint in this contract is wired yet.
 
-### CONTRACT DEFINED FOR NEXT IMPLEMENTATION (to be built against this contract)
+### IMPLEMENTED AGAINST THIS CONTRACT
 
-- `GET /templates`, `GET /templates/{id}`, `POST /templates/import`,
-  `POST /templates/{id}/duplicate`, the three PATCH endpoints,
-  `GET /templates/{id}/import-issues`.
-- The repository/use-case wiring that backs them.
-- File upload handling, error envelope, and the bearer-auth dependency.
+- `POST /api/templates/import` — full §9.3 pipeline: `multipart/form-data` `file`,
+  10 MiB cap, extension+content container validation (`415`/`413`), importer-driven
+  structure validation (`422 INVALID_XLSX`), atomic persist through an owner-scoped
+  repository (Postgres adapter, `app/adapters/repositories/postgres.py`), `201 ImportResult`
+  with `Location`, and the §14 error envelope (including
+  `422 VALIDATION_ERROR` for a missing/malformed request body).
+- The error-envelope exception handlers and the bearer-auth dependency
+  (`AUTHENTICATION_REQUIRED`/`INVALID_TOKEN`) under the `/api` base path. The envelope's
+  `401` responses now also set `WWW-Authenticate: Bearer` (§14), and unsupported-method
+  (`405`) responses advertise the supported methods via the RFC 9110 `Allow` header.
+- `GET /api/templates`, `GET /api/templates/{id}`, and
+  `GET /api/templates/{id}/import-issues` — summaries (newest first by `updated_at`),
+  one template's full hierarchy (§13.2, never including issues or `owner_id`), and the
+  persisted diagnostics (newest first). Every read is owner-scoped, and a missing **or**
+  foreign template is always the same `404 TEMPLATE_NOT_FOUND` (§20).
+- Domain ids/timestamps required by §13 (§27 issue 1 resolution) and the
+  `copied_from_id` field on `Template`.
+- `POST /api/templates/{id}/duplicate` — ownership-scoped transactional deep copy (§9.4,
+  §17 semantics of the in-memory adapter): brand-new ids for the template and every
+  descendant, own timestamps, `copied_from_id` provenance, no import issues copied,
+  `"<source name> (Copy)"` default name or an optional trimmed 1–200 `{"name"}` body
+  (§12.3, `null`/absent allowed), `201` + the new `Template` (§13.2) + `Location` header.
+  Missing/foreign source is the generic `404 TEMPLATE_NOT_FOUND` (§20).
+- The three PATCH endpoints (§10, §20/§21): `PATCH /api/templates/{id}/sections/{section_id}`
+  and `.../items/{item_id}` rename (`{"name"}`, trimmed 1–200) with `204`;
+  `PATCH .../comments/{comment_id}` replaces `{"content"}` verbatim (empty string clears)
+  with `204`. Each is a single-row edit (template timestamps not bumped); the body schema
+  enforces exactly the one documented field and rejects extras (`422 VALIDATION_ERROR`).
+  A missing/foreign template is `404 TEMPLATE_NOT_FOUND`; once the owned template is
+  verified, an unresolved child id is the child-specific `404 SECTION_NOT_FOUND` /
+  `ITEM_NOT_FOUND` / `COMMENT_NOT_FOUND` (§20).
+- The repository adapter situation: the PostgreSQL adapter
+  (`app/adapters/repositories/postgres.py`, SQLAlchemy async + asyncpg, wired through
+  `app/infrastructure/database`) implements every protocol method — `save`, `get`,
+  `list_for_user`, `list_import_issues`, `update_section_name`, `update_item_name`,
+  `update_comment_content`, `duplicate` (transactional, §17), and the owner-scoped
+  `delete` (not exposed by the contract). Its SQL follows the parameterized patterns in
+  `DATABASE_DESIGN.md` §20; docs/API-CONTRACTS §20/§21 semantics (indistinguishable
+  missing/foreign template, child-specific 404s, single-row edits that never bump
+  template timestamps) match the in-memory adapter exactly. The in-memory adapter remains
+  for offline tests; its `delete` still raises `NotImplementedError` (fails loudly).
 
-> Nothing in this section is operational until the backend implementation phase lands.
-> This document freezes the target, it does not claim delivery.
+### CONTRACT AS IMPLEMENTED
+
+All §9 operations — import, list, get, import-issues, duplicate, and the three PATCHes —
+are implemented against this contract, backed by the PostgreSQL repository adapter.
+
+> Implementation status: the backend phase has landed; this document freezes the target
+> contract it was built against.
 
 ---
 

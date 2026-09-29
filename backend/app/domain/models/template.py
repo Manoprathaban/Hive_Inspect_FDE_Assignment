@@ -88,6 +88,7 @@ class CommentOption:
     option_type: OptionType
     value: str
     display_order: int = 0
+    id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,7 @@ class Comment:
     estimate_max: Decimal | None = None
     source_row: int | None = None
     options: list[CommentOption] = field(default_factory=list)
+    id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -117,6 +119,7 @@ class Item:
     name: str
     display_order: int = 0
     comments: list[Comment] = field(default_factory=list)
+    id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,7 @@ class Section:
     name: str
     display_order: int = 0
     items: list[Item] = field(default_factory=list)
+    id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -138,6 +142,7 @@ class ImportIssue:
     source_row: int | None = None
     source_field: str | None = None
     raw_value: str | None = None
+    id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -145,7 +150,11 @@ class Template:
     """Complete structured inspection template (the domain aggregate).
 
     ``id``/``owner_id`` are optional because importers produce unsaved templates;
-    repositories fill them in when persisting.
+    repositories fill them in when persisting. The same applies to the nested
+    ``Section``/``Item``/``Comment``/``CommentOption`` ``id``s and to ``created_at`` /
+    ``updated_at``: they mirror the Postgres schema, which the API contract (§13 of
+    ``docs/API-CONTRACTS.md``) needs on every resource, but unsaved aggregates leave them
+    unset.
     """
 
     name: str
@@ -155,6 +164,9 @@ class Template:
     issues: list[ImportIssue] = field(default_factory=list)
     id: uuid.UUID | None = None
     owner_id: uuid.UUID | None = None
+    copied_from_id: uuid.UUID | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 @dataclass(frozen=True)

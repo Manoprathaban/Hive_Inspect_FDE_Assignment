@@ -55,8 +55,20 @@ adapter can satisfy it.
   ```
 
 - **`TemplateRepository`** (`protocols/repositories/`)
-  Persistence boundary for templates. Supabase-backed and in-memory adapters can both
-  satisfy it.
+  Persistence boundary for templates. A PostgreSQL adapter
+  (`adapters/repositories/postgres.py`, SQLAlchemy async + asyncpg) and an in-memory
+  adapter (`adapters/repositories/in_memory.py`, tests/offline) both satisfy it.
+
+- **`AuthenticationProvider`** (`protocols/authentication.py`)
+  Resolves a bearer token into a domain `UserContext` (`user_id` → `templates.owner_id`).
+  The API layer picks the concrete provider by environment: dev stub in `development`,
+  Supabase JWT validation in `production`.
+
+  ```
+  AuthenticationProvider (protocol)
+      ├── DevAuthProvider           (development — deterministic user)
+      └── SupabaseAuthProvider      (production — HS256 JWT verification)
+  ```
 
 ### Reserved for later (no code yet)
 
