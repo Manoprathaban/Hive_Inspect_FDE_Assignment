@@ -1,0 +1,38 @@
+# Render Blueprint — Hive Inspect Template Importer backend.
+#
+# Deploy: render.com → New + → Blueprint → select this repo → Create Resources.
+# render.yaml at the repo root drives the Web Service; the backend build context is
+# backend/ (rootDir), built from backend/Dockerfile.
+#
+# Env vars marked `sync: false` are NOT stored in this file. After the service is
+# created, set them in the Render dashboard (Service → Environment) and redeploy:
+#   APP_ENV              = production          (already set; enables Supabase JWT validation)
+#   DATABASE_URL         = Supabase session-pooler asyncpg URL (ssl=require)
+#   SUPABASE_URL         = https://<ref>.supabase.co
+#   SUPABASE_JWT_SECRET  = project JWT secret (dashboard → Settings → API → JWT Settings)
+#   CORS_ORIGINS         = comma-separated allowed frontend origins (e.g. the Vercel URL)
+#
+# Never commit real values here — secrets belong in the Render dashboard.
+
+services:
+  - type: web
+    name: hive-inspect-api
+    runtime: docker
+    repo: https://github.com/Manoprathaban/Hive_Inspect_FDE_Assignment
+    branch: main
+    rootDir: backend
+    dockerfilePath: Dockerfile
+    plan: free
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
