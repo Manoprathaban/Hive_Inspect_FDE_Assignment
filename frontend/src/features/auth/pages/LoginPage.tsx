@@ -1,6 +1,6 @@
 /**
- * /login — Supabase Auth email/password, or the deterministic dev fallback when Supabase
- * is not configured (FRONTEND_DESIGN §7/§31). No signup form; signup is Supabase-side.
+ * /login — Supabase Auth email/password sign-in and sign-up, or the deterministic dev
+ * fallback when Supabase is not configured (FRONTEND_DESIGN §7/§31).
  */
 
 import { useState } from 'react'
@@ -16,10 +16,11 @@ interface LocationState {
 }
 
 export function LoginPage() {
-  const { session, isInitializing, isDevMode, login } = useSession()
-  const machine = useLoginMachine()
+  const { session, isInitializing, isDevMode, login, signup } = useSession()
+  const machine = useLoginMachine('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -32,13 +33,38 @@ export function LoginPage() {
 
   const destination = (location.state as LocationState | null)?.from ?? '/templates'
 
+  const isSignUp = machine.state.mode === 'signup'
+
   async function handleSubmit(event: FormEvent) {
     event.preventDefault()
+
+    if (isSignUp) {
+      if (password !== confirmPassword) {
+        machine.fail('Passwords do not match.')
+        return
+      }
+      if (password.length < 6) {
+        machine.fail('Password must be at least 6 characters.')
+        return
+      }
+    }
+
     machine.submit()
+
     try {
-      await login(email, password)
-      machine.succeed()
-      navigate(destination, { replace: true })
+      if (isSignUp) {
+        const result = await signup(email, password)
+        if (result.sessionCreated) {
+          machine.succeed()
+          navigate(destination, { replace: true })
+        } else {
+          machine.showInfo(result.message ?? 'Sign up successful! Please check your email to confirm.')
+        }
+      } else {
+        await login(email, password)
+        machine.succeed()
+        navigate(destination, { replace: true })
+      }
     } catch (error) {
       const entry = describeError(error)
       machine.fail(entry.message)
@@ -48,7 +74,11 @@ export function LoginPage() {
   async function handleDevLogin() {
     machine.submit()
     try {
-      await login('dev@example.com', '')
+      if (isSignUp) {
+        await signup('dev@example.com', 'devpass')
+      } else {
+        await login('dev@example.com', '')
+      }
       machine.succeed()
       navigate(destination, { replace: true })
     } catch (error) {
@@ -57,11 +87,40 @@ export function LoginPage() {
     }
   }
 
+  const toggleMode = (mode: 'signin' | 'signup') => {
+    machine.setMode(mode)
+    setPassword('')
+    setConfirmPassword('')
+  }
+
   return (
     <section className="page login-page">
       <div className="card login-card">
         <h1>Hive Inspect</h1>
-        <p className="tagline">Template Importer sign in</p>
+        <p className="tagline">
+          {isSignUp ? 'Create your account' : 'Template Importer sign in'}
+        </p>
+
+        <div className="auth-tabs" role="tablist" aria-label="Authentication Options">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={!isSignUp}
+            className={`auth-tab ${!isSignUp ? 'auth-tab--active' : ''}`}
+            onClick={() => toggleMode('signin')}
+          >
+            Sign In
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={isSignUp}
+            className={`auth-tab ${isSignUp ? 'auth-tab--active' : ''}`}
+            onClick={() => toggleMode('signup')}
+          >
+            Sign Up
+          </button>
+        </div>
 
         {isDevMode ? (
           <div className="dev-login">
@@ -75,49 +134,102 @@ export function LoginPage() {
               onClick={handleDevLogin}
               disabled={machine.state.phase === 'submitting'}
             >
-              {machine.state.phase === 'submitting' ? 'Signing in…' : 'Continue as demo user'}
+              {machine.state.phase === 'submitting'
+                ? isSignUp
+                  ? 'Creating account…'
+                  : 'Signing in…'
+                : isSignUp
+                  ? 'Sign up as demo user'
+                  : 'Continue as demo user'}
             </button>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="login-form">
-            <label htmlFor="login-email">Email</label>
+            <label htmlFor="auth-email">Email</label>
             <input
-              id="login-email"
+              id="auth-email"
               type="email"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
               required
             />
-            <label htmlFor="login-password">Password</label>
+            <label htmlFor="auth-password">Password</label>
             <input
-              id="login-password"
+              id="auth-password"
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}
-              autoComplete="current-password"
+              autoComplete={isSignUp ? 'new-password' : 'current-password'}
               required
             />
+            {isSignUp && (
+              <>
+                <label htmlFor="auth-confirm-password">Confirm Password</label>
+                <input
+                  id="auth-confirm-password"
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(event) => setConfirmPassword(event.target.value)}
+                  autoComplete="new-password"
+                  required
+                />
+              </>
+            )}
+
             {machine.state.phase === 'error' && (
               <p className="field-error" aria-live="polite">
                 {machine.state.message}
               </p>
             )}
+
+            {machine.state.phase === 'info' && (
+              <p className="field-info" aria-live="polite">
+                {machine.state.message}
+              </p>
+            )}
+
             <button
               type="submit"
               className="button button--primary"
               disabled={machine.state.phase === 'submitting'}
             >
-              {machine.state.phase === 'submitting' ? 'Signing in…' : 'Sign in'}
+              {machine.state.phase === 'submitting'
+                ? isSignUp
+                  ? 'Creating account…'
+                  : 'Signing in…'
+                : isSignUp
+                  ? 'Sign Up'
+                  : 'Sign In'}
             </button>
           </form>
         )}
 
-        {machine.state.phase === 'error' && !isDevMode && (
-          <p className="field-error" aria-live="polite">
-            {machine.state.message}
-          </p>
-        )}
+        <div className="auth-footer">
+          {isSignUp ? (
+            <p>
+              Already have an account?{' '}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => toggleMode('signin')}
+              >
+                Sign In
+              </button>
+            </p>
+          ) : (
+            <p>
+              Don't have an account?{' '}
+              <button
+                type="button"
+                className="link-button"
+                onClick={() => toggleMode('signup')}
+              >
+                Sign Up
+              </button>
+            </p>
+          )}
+        </div>
       </div>
     </section>
   )

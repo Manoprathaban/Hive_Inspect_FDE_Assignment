@@ -269,14 +269,14 @@ def test_list_for_user_is_owner_scoped_and_newest_first() -> None:
             await repo.save(_rich_template(name="Gamma"), owner_id=USER_B)
             async with engine.begin() as conn:
                 await conn.execute(
-                    text("ALTER TABLE public.templates " "DISABLE TRIGGER templates_set_updated_at")
+                    text("ALTER TABLE public.templates DISABLE TRIGGER templates_set_updated_at")
                 )
                 await conn.execute(
-                    text("UPDATE public.templates SET updated_at = '2020-01-01' " "WHERE id = :id"),
+                    text("UPDATE public.templates SET updated_at = '2020-01-01' WHERE id = :id"),
                     {"id": first.id},
                 )
                 await conn.execute(
-                    text("ALTER TABLE public.templates " "ENABLE TRIGGER templates_set_updated_at")
+                    text("ALTER TABLE public.templates ENABLE TRIGGER templates_set_updated_at")
                 )
 
             summaries = await repo.list_for_user(USER_A)
