@@ -17,11 +17,17 @@ export interface Session {
   accessToken: string
 }
 
+export interface SignupResult {
+  sessionCreated: boolean
+  message?: string
+}
+
 interface AuthContextValue {
   session: Session | null
   isInitializing: boolean
   isDevMode: boolean
   login: (email: string, password: string) => Promise<void>
+  signup: (email: string, password: string) => Promise<SignupResult>
   logout: () => Promise<void>
 }
 
@@ -64,6 +70,27 @@ function AuthProvider({ children }: { children: ReactNode }) {
     if (!accessToken) throw new Error('No session returned from Supabase.')
     setState({ session: { accessToken }, isInitializing: false })
   }, [client])
+
+  const signup = useCallback(
+    async (email: string, password: string): Promise<SignupResult> => {
+      if (!client) {
+        setState({ session: { accessToken: 'dev-token' }, isInitializing: false })
+        return { sessionCreated: true }
+      }
+      const { data, error } = await client.auth.signUp({ email, password })
+      if (error) throw error
+      const accessToken = data.session?.access_token
+      if (accessToken) {
+        setState({ session: { accessToken }, isInitializing: false })
+        return { sessionCreated: true }
+      }
+      return {
+        sessionCreated: false,
+        message: 'Account created! Please check your email to confirm your sign up.',
+      }
+    },
+    [client],
+  )
 
   // Register the 401 handler once: any API 401 signs out (never shown raw).
   useEffect(() => {
@@ -122,6 +149,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
     isInitializing: state.isInitializing,
     isDevMode: !client,
     login,
+    signup,
     logout,
   }
 
