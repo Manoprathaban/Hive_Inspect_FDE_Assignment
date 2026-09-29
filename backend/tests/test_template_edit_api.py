@@ -88,9 +88,7 @@ def _make_template(**overrides) -> Template:
 
 def _seed(repository: InMemoryTemplateRepository, **kw) -> Template:
     return asyncio.run(
-        repository.save(
-            _make_template(**kw), owner_id=kw.pop("owner_id", DEV_USER_ID)
-        )
+        repository.save(_make_template(**kw), owner_id=kw.pop("owner_id", DEV_USER_ID))
     )
 
 
@@ -258,9 +256,7 @@ def test_patch_on_foreign_template_is_404() -> None:
         ("comments/{comment_id}", "COMMENT_NOT_FOUND"),
     ],
 )
-def test_patch_child_not_under_owned_template_is_child_404(
-    path: str, expected_code: str
-) -> None:
+def test_patch_child_not_under_owned_template_is_child_404(path: str, expected_code: str) -> None:
     repository = _stub()
     saved = _seed(repository)
     target = {
@@ -293,9 +289,7 @@ def test_duplicate_creates_independent_copy_with_location_and_no_issues() -> Non
     # Copy's import issues are empty (no import happened); the original's are intact.
     issues = client.get(f"/api/templates/{copy['id']}/import-issues", headers=AUTH)
     assert issues.json() == []
-    original_issues = client.get(
-        f"/api/templates/{saved.id}/import-issues", headers=AUTH
-    ).json()
+    original_issues = client.get(f"/api/templates/{saved.id}/import-issues", headers=AUTH).json()
     assert len(original_issues) == 1
 
 
@@ -314,9 +308,7 @@ def test_duplicate_with_custom_name() -> None:
 def test_duplicate_empty_body_uses_default_name() -> None:
     repository = _stub()
     saved = _seed(repository)
-    response = client.post(
-        f"/api/templates/{saved.id}/duplicate", json={}, headers=AUTH
-    )
+    response = client.post(f"/api/templates/{saved.id}/duplicate", json={}, headers=AUTH)
     assert response.status_code == 201, response.text
     assert response.json()["name"] == "Sample (Copy)"
 
@@ -338,9 +330,7 @@ def test_duplicate_explicit_null_name_uses_default_name() -> None:
 def test_invalid_duplicate_body_is_422(payload) -> None:
     repository = _stub()
     saved = _seed(repository)
-    response = client.post(
-        f"/api/templates/{saved.id}/duplicate", json=payload, headers=AUTH
-    )
+    response = client.post(f"/api/templates/{saved.id}/duplicate", json=payload, headers=AUTH)
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "VALIDATION_ERROR"
 

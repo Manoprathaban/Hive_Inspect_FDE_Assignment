@@ -28,6 +28,7 @@ from app.protocols.importers.template_importer import TemplateImporter
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_SHEET = REPO_ROOT / "sample-data" / "sheet1.xml"
+SECOND_SHEET = REPO_ROOT / "sample-data" / "commercial-rental.xml"
 
 NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 
@@ -471,3 +472,127 @@ def test_header_only_worksheet_raises() -> None:
     rows = [["Section Name", "Item Name", "Comment Name", "Comment Type", "Answer Type"]]
     with pytest.raises(TemplateImportError, match="no template data rows"):
         SpectoraXlsxImporter().import_template(_worksheet_xml(rows))
+
+
+# ---------------------------------------------------------------------------
+# A second, structurally different export in the same format.
+#
+# The assignment says "We may try another export in the same HTML-text format", so
+# these tests pin the claim that the importer is driven by the header row rather than
+# by the shape of the committed InterNACHI file. SECOND_SHEET carries 12 of the 42
+# columns, an extra column the importer does not model, and four dirty values.
+# ---------------------------------------------------------------------------
+
+
+def test_second_export_imports_without_the_canonical_columns() -> None:
+    """A leaner export with none of the optional InterNACHI columns still imports."""
+    template = SpectoraXlsxImporter().import_template(
+        SECOND_SHEET.read_bytes(), filename="commercial-rental.xml"
+    )
+
+    assert template.name == "commercial-rental"
+    assert template.source == "spectora"
+    assert [section.name for section in template.sections] == ["Exterior", "Interior", "Systems"]
+    assert sum(len(section.items) for section in template.sections) == 4
+    assert len(_all_comments(template)) == 6
+
+
+def test_second_export_maps_the_columns_it_does_carry() -> None:
+    template = SpectoraXlsxImporter().import_template(SECOND_SHEET.read_bytes())
+    comments = _all_comments(template)
+
+    roofing = next(c for c in comments if c.name == "Roofing Material")
+    assert roofing.comment_type is CommentType.INFO
+    assert roofing.answer_type is AnswerType.CHECKBOX
+    assert roofing.category == 0
+    assert [o.value for o in roofing.options] == [
+        "Asphalt",
+        "Composition",
+        "Metal",
+        "Tile",
+        "Wood Shake",
+    ]
+    assert all(o.option_type is OptionType.MULTIPLE_CHOICE for o in roofing.options)
+
+    age = next(c for c in comments if c.name == "Estimated Age")
+    assert age.content == "Enter the age of the covering in years."
+    assert age.answer_type is AnswerType.NUMBER
+    assert age.category == -1
+
+    joist = next(c for c in comments if c.name == "Joist Support")
+    assert joist.comment_type is CommentType.DEFECT
+    assert joist.category == 1
+
+
+def test_second_export_absent_optional_columns_are_left_unset() -> None:
+    """Columns the export omits must not be invented, and must not raise."""
+    template = SpectoraXlsxImporter().import_template(SECOND_SHEET.read_bytes())
+
+    for comment in _all_comments(template):
+        assert comment.estimate_min is None
+        assert comment.estimate_max is None
+        assert comment.recommendation is None
+        assert comment.default_unit_type is None
+        assert comment.default_value_2 is None
+
+
+def test_second_export_preserves_ordering_from_the_export() -> None:
+    """Section/item/comment order comes from the export, not from row position."""
+    template = SpectoraXlsxImporter().import_template(SECOND_SHEET.read_bytes())
+
+    assert [s.display_order for s in template.sections] == [0, 1, 2]
+    systems = template.sections[2]
+    assert [i.name for i in systems.items] == ["Electrical", "Plumbing"]
+    assert [i.display_order for i in systems.items] == [0, 1]
+    plumbing = systems.items[1]
+    assert [c.name for c in plumbing.comments] == ["Water Heater", "Supply Condition"]
+    assert [c.display_order for c in plumbing.comments] == [0, 1]
+    assert [c.source_row for c in plumbing.comments] == [6, 7]
+
+
+def test_second_export_surfaces_dirty_values_instead_of_coercing_silently() -> None:
+    """Every bad value in the second export is reported, not quietly fixed."""
+    template = SpectoraXlsxImporter().import_template(SECOND_SHEET.read_bytes())
+    by_field = {issue.source_field: issue for issue in template.issues}
+
+    assert set(by_field) == {
+        "Comment Type",
+        "Answer Type",
+        "Category",
+        "Inspector Signature Required",
+        "Last Modified",
+    }
+    for issue in template.issues:
+        assert issue.severity.value == "warning"
+
+    # Data that is present but wrong is INVALID_SOURCE_DATA; a column with nowhere to go
+    # is UNSUPPORTED_CONTENT. Both are reported; neither is dropped.
+    invalid = {
+        i.source_field for i in template.issues if i.issue_type is IssueType.INVALID_SOURCE_DATA
+    }
+    assert invalid == {"Comment Type", "Answer Type", "Category"}
+
+    # The bad values fall back to something safe, and the fallback is reported.
+    assert "observation" in by_field["Comment Type"].message
+    assert "multi-select" in by_field["Answer Type"].message
+    assert "critical" in by_field["Category"].message
+
+    water_heater = next(c for c in _all_comments(template) if c.name == "Water Heater")
+    assert water_heater.comment_type is CommentType.INFO
+    assert water_heater.answer_type is AnswerType.BOOLEAN
+    assert water_heater.category is None
+    # Data in a column the schema has no home for is still preserved as an option value.
+    assert [o.value for o in water_heater.options] == ["Gas", "Electric", "Solar"]
+
+
+def test_second_export_reports_unmodeled_column_as_unsupported_content() -> None:
+    """A column the importer cannot represent is surfaced, never dropped in silence."""
+    template = SpectoraXlsxImporter().import_template(SECOND_SHEET.read_bytes())
+
+    unsupported = [i for i in template.issues if i.issue_type is IssueType.UNSUPPORTED_CONTENT]
+    assert {i.source_field for i in unsupported} == {
+        "Inspector Signature Required",
+        "Last Modified",
+    }
+    # One issue per unmodeled column, not one per data row.
+    assert len([i for i in unsupported if i.source_field == "Last Modified"]) == 1

@@ -8,35 +8,29 @@
 
 ## Backend — Render
 
-`backend/Dockerfile` builds a Python 3.13 image that runs `uvicorn app.main:app`. It now
-honors Render's injected `PORT` (falling back to `8000` for local Docker).
+`backend/Dockerfile` builds a Python 3.13 image that runs `uvicorn app.main:app`.
 
-The Render blueprint is committed at the repo root (`render.yaml`): a `docker` Web Service
-named `hive-inspect-api` with `rootDir: backend`, `healthCheckPath: /health`, and
-`APP_ENV=production`.
+Render blueprint (`render.yaml`) is intentionally **not** added yet — it can be generated
+later from the Render dashboard. Required env vars when it is:
 
-### Deploy steps (one-time)
-
-1. Push/merge the backend as `main`.
-2. Render dashboard → **New +** → **Blueprint** → select this GitHub repo.
-3. Render creates the `hive-inspect-api` Web Service from `render.yaml`.
-4. In the service's **Environment** tab set the values marked `sync: false`:
-   - `DATABASE_URL` — Supabase session-pooler asyncpg URL (see `docs/supabase-deployment.md`),
-     e.g. `postgresql+asyncpg://postgres.<ref>@aws-0-<region>.pooler.supabase.com:5432/postgres?ssl=require`
-   - `SUPABASE_URL` — `https://<project-ref>.supabase.co`
-   - `SUPABASE_JWT_SECRET` — project JWT secret (Supabase dashboard → Settings → API →
-     JWT Settings)
-   - `CORS_ORIGINS` — comma-separated allowed frontend origins (Vercel URL once shipped)
-5. Save; Render redeploys. Verify `GET <service-url>/health` returns `200`.
-6. Optional PR Plugs/instance: on the free plan the service auto-sleeps when idle.
-
-`GEMINI_API_KEY` is only needed if/when AI features are scoped.
+- `DATABASE_URL` (Supabase PostgreSQL connection string)
+- `CORS_ORIGINS` (comma-separated frontend origins). The built-in default covers local
+  development only — `http://localhost:5173` (Vite dev), `http://localhost:4173`
+  (`npm run preview`, i.e. the production build) and `http://localhost:3000`. In a
+  deployment it must contain the exact frontend origin, e.g.
+  `CORS_ORIGINS=https://<app>.vercel.app`, or every browser call is blocked by CORS.
+- `APP_ENV=production`
+- `GEMINI_API_KEY` only if/when AI is used
 
 ## Frontend — Vercel
 
 - Framework preset: Vite. Build output: `dist/`.
 - Env vars (public only): `VITE_API_BASE_URL` → the Render service URL.
 - Never put secrets in frontend env vars — the browser ships them to clients.
+- Real Supabase sign-in additionally needs `VITE_SUPABASE_URL` and
+  `VITE_SUPABASE_ANON_KEY` (the public anon key). Without them the app runs on the
+  development session, which the production backend rejects — see `docs/FRONTEND_DESIGN.md`
+  §7 and §32.
 
 ## Database — Supabase
 
@@ -48,10 +42,18 @@ named `hive-inspect-api` with `rootDir: backend`, `healthCheckPath: /health`, an
 
 ## CI/CD pipeline
 
-CI (`.github/workflows/ci.yml`) runs on push/PR for `main` and feature branches:
+CI (`.github/workflows/ci.yml`) runs on push to `main` and on pull requests, restricted to
+`backend/**`, `frontend/**`, `database/**`, and the workflow file itself.
 
-1. Backend: ruff lint → pytest (including tests that verify layering/imports).
-2. Frontend: `npm ci` → `tsc --noEmit` → `vite build`.
-3. Optionally, migrations are applied to a disposable PostgreSQL service container.
+Three independent jobs mirror the local quality gates:
+
+1. Backend: `pip install -r requirements.txt` → `ruff check .` → `ruff format --check .` → `pytest`
+   (including tests that verify layering/imports).
+2. Frontend: `npm ci` → `npm run lint` → `npm run typecheck` → `npm test` → `npm run build`.
+3. Database: migrations applied in order to a disposable PostgreSQL 17 service container →
+   `ruff check .` → `pytest` (schema/RLS/ownership tests on a fresh database).
+
+pip and npm dependency caches are keyed on the lock/requirements files. No job receives
+secrets; deployment credentials stay in the Render/Vercel secret stores.
 
 Deploy steps are triggered in the Vercel/Render consoles (git-connected), keeping CI lean.

@@ -26,7 +26,10 @@ class Settings(BaseSettings):
     app_env: str = "development"
     debug: bool = False
 
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    # Browser origins allowed to call the API. The defaults are the frontend's own dev
+    # server (5173), its production-build preview (4173) and the alternate dev port (3000);
+    # a deployed frontend origin must be set explicitly via the environment.
+    cors_origins: str = "http://localhost:5173,http://localhost:4173,http://localhost:3000"
 
     max_upload_bytes: int = 10 * 1024 * 1024
 

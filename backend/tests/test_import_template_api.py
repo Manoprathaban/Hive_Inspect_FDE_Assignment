@@ -150,9 +150,7 @@ def test_import_creates_persisted_template_with_ids_and_location() -> None:
     assert issue["raw_value"] == "true"
 
     assert response.headers["Location"] == f"/api/templates/{template['id']}"
-    saved = asyncio.run(
-        repository.get(uuid.UUID(template["id"]), owner_id=DEV_USER_ID)
-    )
+    saved = asyncio.run(repository.get(uuid.UUID(template["id"]), owner_id=DEV_USER_ID))
     assert saved is not None
     assert saved.name == "InterNACHI Residential"
 

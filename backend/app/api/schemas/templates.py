@@ -1,4 +1,4 @@
-﻿"""HTTP request/response schemas for the template API (presentation layer).
+"""HTTP request/response schemas for the template API (presentation layer).
 
 Mirror ``docs/API-CONTRACTS.md`` §12/§13 exactly (Pydantic v2, ``extra="forbid"``). Field
 names match the database/domain; exclusions follow the contract: ``owner_id`` and FK
@@ -131,9 +131,7 @@ class CommentResponse(BaseModel):
             estimate_min=_to_float(comment.estimate_min),
             estimate_max=_to_float(comment.estimate_max),
             source_row=comment.source_row,
-            options=[
-                CommentOptionResponse.from_domain(option) for option in comment.options
-            ],
+            options=[CommentOptionResponse.from_domain(option) for option in comment.options],
         )
 
 
@@ -272,10 +270,7 @@ class ImportResultResponse(BaseModel):
         """
         return cls(
             template=TemplateResponse.from_domain(template),
-            issues=[
-                ImportIssueResponse.from_domain(issue)
-                for issue in reversed(template.issues)
-            ],
+            issues=[ImportIssueResponse.from_domain(issue) for issue in reversed(template.issues)],
         )
 
 
