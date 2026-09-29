@@ -243,8 +243,7 @@ class PostgresTemplateRepository:
         async with self._engine.begin() as conn:
             result = await conn.execute(
                 text(
-                    "DELETE FROM public.templates "
-                    "WHERE id = :template_id AND owner_id = :owner_id"
+                    "DELETE FROM public.templates WHERE id = :template_id AND owner_id = :owner_id"
                 ),
                 {"template_id": template_id, "owner_id": owner_id},
             )

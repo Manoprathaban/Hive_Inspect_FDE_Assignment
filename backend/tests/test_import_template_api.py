@@ -69,8 +69,8 @@ def _stub(
     repository = InMemoryTemplateRepository()
     client.app.dependency_overrides[get_template_repository] = lambda: repository
     if fake is not None:
-        client.app.dependency_overrides[get_import_template_use_case] = (
-            lambda: ImportTemplateUseCase(importer=fake)
+        client.app.dependency_overrides[get_import_template_use_case] = lambda: (
+            ImportTemplateUseCase(importer=fake)
         )
     return repository
 

@@ -59,10 +59,27 @@ def _allow_header(application: FastAPI, request: Request) -> str | None:
     The methods of every route whose path matches (full or partial) are unioned, so a
     resource that is both ``POST /import`` and ``GET /{template_id}`` (path overlap) lists
     both. Returns ``None`` when nothing matched, letting the header be omitted.
+
+    Newer Starlette (0.42+) wraps sub-routers in ``_IncludedRouter`` objects that expose
+    ``effective_route_contexts()`` — a flattened view of all leaf routes with their full
+    absolute paths. When available, that API is used so ``matches()`` works correctly
+    against the real request scope.
     """
 
     allowed: set[str] = set()
     for route in application.routes:
+        # Newer Starlette: _IncludedRouter with effective_route_contexts()
+        ec_fn = getattr(route, "effective_route_contexts", None)
+        if callable(ec_fn):
+            for ctx in ec_fn():
+                ctx_match, _ = ctx.matches(request.scope)
+                if ctx_match is Match.NONE:
+                    continue
+                ctx_methods = getattr(ctx, "methods", None)
+                if ctx_methods:
+                    allowed.update(ctx_methods)
+            continue
+        # Legacy plain Route / APIRoute
         match, _ = route.matches(request.scope)
         if match is Match.NONE:
             continue
