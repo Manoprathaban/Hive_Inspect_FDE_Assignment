@@ -8,15 +8,29 @@
 
 ## Backend — Render
 
-`backend/Dockerfile` builds a Python 3.13 image that runs `uvicorn app.main:app`.
+`backend/Dockerfile` builds a Python 3.13 image that runs `uvicorn app.main:app`. It now
+honors Render's injected `PORT` (falling back to `8000` for local Docker).
 
-Render blueprint (`render.yaml`) is intentionally **not** added yet — it can be generated
-later from the Render dashboard. Required env vars when it is:
+The Render blueprint is committed at the repo root (`render.yaml`): a `docker` Web Service
+named `hive-inspect-api` with `rootDir: backend`, `healthCheckPath: /health`, and
+`APP_ENV=production`.
 
-- `DATABASE_URL` (Supabase PostgreSQL connection string)
-- `CORS_ORIGINS` (comma-separated frontend origins)
-- `APP_ENV=production`
-- `GEMINI_API_KEY` only if/when AI is used
+### Deploy steps (one-time)
+
+1. Push/merge the backend as `main`.
+2. Render dashboard → **New +** → **Blueprint** → select this GitHub repo.
+3. Render creates the `hive-inspect-api` Web Service from `render.yaml`.
+4. In the service's **Environment** tab set the values marked `sync: false`:
+   - `DATABASE_URL` — Supabase session-pooler asyncpg URL (see `docs/supabase-deployment.md`),
+     e.g. `postgresql+asyncpg://postgres.<ref>@aws-0-<region>.pooler.supabase.com:5432/postgres?ssl=require`
+   - `SUPABASE_URL` — `https://<project-ref>.supabase.co`
+   - `SUPABASE_JWT_SECRET` — project JWT secret (Supabase dashboard → Settings → API →
+     JWT Settings)
+   - `CORS_ORIGINS` — comma-separated allowed frontend origins (Vercel URL once shipped)
+5. Save; Render redeploys. Verify `GET <service-url>/health` returns `200`.
+6. Optional PR Plugs/instance: on the free plan the service auto-sleeps when idle.
+
+`GEMINI_API_KEY` is only needed if/when AI features are scoped.
 
 ## Frontend — Vercel
 
