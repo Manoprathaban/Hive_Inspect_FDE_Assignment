@@ -27,9 +27,10 @@ from app.domain.models.template import (
     OptionType,
     Section,
     Template,
+    TemplateSummary,
 )
 
-__all__ = ["ImportResultResponse", "TemplateResponse"]
+__all__ = ["ImportResultResponse", "TemplateResponse", "TemplateSummaryResponse"]
 
 
 class CommentOptionResponse(BaseModel):
@@ -159,6 +160,30 @@ class TemplateResponse(BaseModel):
             created_at=_required_timestamp(template.created_at),
             updated_at=_required_timestamp(template.updated_at),
             sections=[SectionResponse.from_domain(section) for section in template.sections],
+        )
+
+
+class TemplateSummaryResponse(BaseModel):
+    """One list card for ``GET /templates``, §13.1 (no hierarchy, no issues)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    name: str
+    source: str
+    source_filename: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_domain(cls, summary: TemplateSummary) -> TemplateSummaryResponse:
+        return cls(
+            id=summary.id,
+            name=summary.name,
+            source=summary.source,
+            source_filename=summary.source_filename,
+            created_at=_required_timestamp(summary.created_at),
+            updated_at=_required_timestamp(summary.updated_at),
         )
 
 

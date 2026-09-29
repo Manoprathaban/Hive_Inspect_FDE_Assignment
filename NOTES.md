@@ -84,10 +84,31 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   is the documented false positive for an empty `file` part (415 on a non-container, which
   is the contract-mandated response — see `docs/API-CONTRACTS.md` §18).
 
+## 2026-09-29 — Template read API
+
+- Implemented `GET /api/templates`, `GET /api/templates/{id}`, and
+  `GET /api/templates/{id}/import-issues` against §9.1/§9.2/§11: summaries newest-first by
+  `updated_at`, one full hierarchy (§13.2, never exposing issues/`owner_id`), and persisted
+  diagnostics newest-first. No pagination/filtering (§19).
+- Ownership stays the data it always was: a missing **or** foreign template is the same
+  `404 TEMPLATE_NOT_FOUND` (§20). The import-issues route first resolves the template with
+  the owner-scoped `get`, since the repository boundary returns `[]` for missing/foreign.
+- Also aligned the §14 note: the envelope's `401` responses now set
+  `WWW-Authenticate: Bearer` (this applies to every endpoint, import included).
+- All three read endpoints are now on the same `TemplateRepository` adapter the import
+  phase introduced; no repository or contract changes were needed for reads.
+- Schemathesis on this phase: added the RFC 9110 `Allow` header to `405` responses
+  app-wide (was flagged on every operation), clearing those findings. Two documented
+  findings remain, both accepted: (1) `ignored_auth` — the dev auth provider accepts any
+  token by design (offline-only; the production provider validates tokens), and (2) the
+  known `415 INVALID_FILE` on a schema-compliant `file` part whose filename is not a
+  recognized container — the contract-required §18 response.
+
 ## Open questions
 
-- Next phase: `GET /api/templates`, `GET /api/templates/{id}`, the three PATCH endpoints,
-  duplicate, and `GET /api/templates/{id}/import-issues`, backed by the Postgres repository
-  adapter (SQLAlchemy/asyncpg) implementing the same owner-scoped protocol.
+- Next phase: `POST /templates/{id}/duplicate` (transactional deep copy, §17) and the
+  three PATCH edit endpoints (§10), still in-memory-backed.
+- The Postgres repository adapter (SQLAlchemy/asyncpg) implementing the same owner-scoped
+  protocol lands with the write/edit surface so mutations have a real store.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs. a
   tool like Alembic/`supabase db push` — plain SQL chosen for now.

@@ -802,7 +802,14 @@ The contract is implementable directly with FastAPI + Pydantic:
   with `Location`, and the §14 error envelope (including
   `422 VALIDATION_ERROR` for a missing/malformed request body).
 - The error-envelope exception handlers and the bearer-auth dependency
-  (`AUTHENTICATION_REQUIRED`/`INVALID_TOKEN`) under the `/api` base path.
+  (`AUTHENTICATION_REQUIRED`/`INVALID_TOKEN`) under the `/api` base path. The envelope's
+  `401` responses now also set `WWW-Authenticate: Bearer` (§14), and unsupported-method
+  (`405`) responses advertise the supported methods via the RFC 9110 `Allow` header.
+- `GET /api/templates`, `GET /api/templates/{id}`, and
+  `GET /api/templates/{id}/import-issues` — summaries (newest first by `updated_at`),
+  one template's full hierarchy (§13.2, never including issues or `owner_id`), and the
+  persisted diagnostics (newest first). Every read is owner-scoped, and a missing **or**
+  foreign template is always the same `404 TEMPLATE_NOT_FOUND` (§20).
 - Domain ids/timestamps required by §13 (§27 issue 1 resolution) and the
   `copied_from_id` field on `Template`.
 - The repository adapter situation: `insert`, `fetch`, `list`, and issue reads are
@@ -811,8 +818,7 @@ The contract is implementable directly with FastAPI + Pydantic:
 
 ### CONTRACT DEFINED FOR NEXT IMPLEMENTATION (to be built against this contract)
 
-- `GET /templates`, `GET /templates/{id}`, `POST /templates/{id}/duplicate`, the three
-  PATCH endpoints, `GET /templates/{id}/import-issues`.
+- `POST /templates/{id}/duplicate`, the three PATCH endpoints.
 - The Postgres repository adapter that backs them.
 
 > Nothing in this section is operational until the backend implementation phase lands.
