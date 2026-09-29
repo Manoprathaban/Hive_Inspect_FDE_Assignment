@@ -43,11 +43,8 @@ Protocols already established:
 
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate          # Windows (PowerShell)
-source .venv/bin/activate       # macOS/Linux
-pip install -r requirements.txt
-uvicorn app.main:app --reload
+uv sync                                              # or: pip install -r requirements.txt
+uv run uvicorn app.main:app --reload                 # or: uvicorn app.main:app --reload
 ```
 
 API docs available at http://localhost:8000/docs. Copy `backend/.env.example` to
@@ -57,6 +54,7 @@ Run the checks used in CI:
 
 ```bash
 ruff check .
+ruff format --check .
 pytest
 ```
 
@@ -73,8 +71,8 @@ npm run dev
 
 Copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_BASE_URL` to the
 backend URL (default `http://localhost:8000`, so the backend's default CORS origins —
-`http://localhost:5173` and `http://localhost:3000` — already allow the dev server).
-No secrets live in frontend env vars.
+`http://localhost:5173`, `http://localhost:4173`, `http://localhost:3000` — already allow
+the dev server and a production-build preview). No secrets live in frontend env vars.
 
 With no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` set, the app uses the deterministic
 development session (any credentials; requests carry the dev token the backend's
@@ -102,7 +100,22 @@ consistently on local PostgreSQL, Supabase, and CI. See `database/migrations/REA
 
 ## Phase
 
-Phases 1–4 are implemented: database schema/migrations, backend domain + application,
-the REST API from `docs/API-CONTRACTS.md`, and the React frontend from
-`docs/FRONTEND_DESIGN.md`. Phase 5 (integration) and later phases are tracked in
-`NOTES.md`.
+Phases 1-6 are implemented: database schema/migrations, backend domain + application, the
+REST API from `docs/API-CONTRACTS.md`, the React frontend from `docs/FRONTEND_DESIGN.md`,
+live-stack integration against the deployed Supabase database, and CI mirroring the local
+quality gates. See `NOTES.md` for the phase-by-phase record, the cut list, and known
+limitations.
+
+## Seeding a template
+
+The deployed app is seeded with the committed Spectora export so it opens on something to
+explore. The seed runs the real importer and the real repository (no hand-written SQL), so
+what a reviewer sees is exactly what an upload produces:
+
+```bash
+cd backend
+uv run python -m scripts.seed_sample_template            # no-op if templates exist
+uv run python -m scripts.seed_sample_template --dry-run  # parse and report, write nothing
+```
+
+Flags: `--owner-id UUID` (defaults to the dev auth user), `--force` to add another copy.

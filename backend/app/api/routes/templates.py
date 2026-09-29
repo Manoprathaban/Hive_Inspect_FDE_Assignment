@@ -164,9 +164,7 @@ def _validate_container(*, filename: str, data: bytes) -> None:
 )
 async def import_template(
     file: Annotated[UploadFile, File()],
-    use_case: Annotated[
-        ImportTemplateUseCase, Depends(get_import_template_use_case)
-    ],
+    use_case: Annotated[ImportTemplateUseCase, Depends(get_import_template_use_case)],
     repository: Annotated[TemplateRepository, Depends(get_template_repository)],
     response: Response = None,
     user: Annotated[UserContext, Depends(get_current_user)] = None,

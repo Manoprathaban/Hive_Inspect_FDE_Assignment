@@ -93,9 +93,7 @@ def register_exception_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(StarletteHTTPException)
-    async def _handle_http_exception(
-        request: Request, exc: StarletteHTTPException
-    ) -> JSONResponse:
+    async def _handle_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
         # A multipart body that cannot be parsed reaches the app as HTTPException(400)
         # (Starlette's Request.form re-raises MultiPartException that way). The contract
         # (§14) normalizes request-body failures to 422 VALIDATION_ERROR. Every other

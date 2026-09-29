@@ -138,9 +138,7 @@ def _materialize(template: Template, *, owner_id: uuid.UUID, now: datetime) -> T
                     replace(
                         comment,
                         id=uuid.uuid4(),
-                        options=[
-                            replace(option, id=uuid.uuid4()) for option in comment.options
-                        ],
+                        options=[replace(option, id=uuid.uuid4()) for option in comment.options],
                     )
                 )
             items.append(replace(item, id=uuid.uuid4(), comments=comments))
@@ -194,11 +192,7 @@ class InMemoryTemplateRepository:
     async def list_for_user(self, owner_id: uuid.UUID) -> list[TemplateSummary]:
         """Summaries of the acting user's templates, most recently updated first."""
 
-        owned = [
-            template
-            for template in self._templates.values()
-            if template.owner_id == owner_id
-        ]
+        owned = [template for template in self._templates.values() if template.owner_id == owner_id]
         owned.sort(key=lambda template: (template.updated_at, template.id), reverse=True)
         return [
             TemplateSummary(
@@ -256,11 +250,7 @@ class InMemoryTemplateRepository:
         """Rename an item owned by ``owner_id`` in ``template_id`` (single-row edit)."""
 
         template = self._owned(template_id, owner_id)
-        if not any(
-            item.id == item_id
-            for section in template.sections
-            for item in section.items
-        ):
+        if not any(item.id == item_id for section in template.sections for item in section.items):
             raise ItemNotFoundError(item_id)
         sections = [
             replace(

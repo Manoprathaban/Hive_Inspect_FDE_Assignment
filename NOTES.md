@@ -301,12 +301,154 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   handoff is verified: the dev session, the `401` path, and the production provider's unit
   and API-wiring tests from Phase 3.
 
+## 2026-09-29 — Phase 6 (CI/CD + deployment validation)
+
+- **CI now mirrors the local gates.** `docs/deployment.md` previously claimed a frontend
+  pipeline of "typecheck + build" and treated migrations as optional. The workflow now runs
+  the real gate set on every push to `main` and every pull request that touches
+  `backend/**`, `frontend/**`, `database/**`, or the workflow file:
+  - backend: `ruff check .` → `ruff format --check .` → `pytest`
+  - frontend: `npm run lint` → `npm run typecheck` → `npm test` → `npm run build`
+  - database: migrations applied in order to a disposable PostgreSQL 17 service, then the
+    schema/RLS/ownership suite against that fresh database
+- **`ruff format` is now enforced, so the repo was formatted.** The backend had 44 files
+  that predated the formatter (a pre-existing, non-CI-enforced caveat) and 14 that already
+  matched. They are now all formatted, `ruff format --check .` is clean, and the workflow
+  will fail on drift. No behaviour changed: `144` tests collected, `134` passed / `10`
+  live-skipped, and app coverage is unchanged at `97%` (`1036` statements, `26` missed).
+- **npm and pip caches** are keyed on `frontend/package-lock.json` and
+  `backend/requirements.txt`, and no job is given secrets; deployment credentials stay in
+  the Render/Vercel secret stores.
+- **CHECK BLOCKED — no hosted CI run.** The workflow executes on `main` pushes and on pull
+  requests. This branch was pushed without opening a PR (not requested), so GitHub Actions
+  has not executed the new jobs. Every command they run was executed locally instead and
+  passes; a PR is the remaining trigger.
+- **CHECK BLOCKED — deployment wiring cannot be exercised from here.** Verifying the
+  Vercel/Render wiring needs the actual deployed hostnames: `CORS_ORIGINS` must equal the
+  exact frontend origin, and the frontend's `VITE_API_BASE_URL` must point at the deployed
+  API. `docs/deployment.md` states both requirements; the values themselves are deployment
+  secrets/environment settings, not repository content.
+
+## 2026-09-29 — Phase 7 (final assignment verification)
+
+Audit of the build against `assignment.md`, item by item. This is the pass that found the
+one thing that would have cost real marks, so it is worth recording what was checked.
+
+- **The live app had nothing to open on.** The assignment requires the deployed app to
+  "open on an imported template" and the database was empty (0 templates) after Phase 5
+  cleaned up after itself. Added `backend/scripts/seed_sample_template.py`, which imports
+  `sample-data/sheet1.xml` through the *real* `SpectoraXlsxImporter` and persists it through
+  the *real* `PostgresTemplateRepository` — deliberately not hand-written SQL, so what the
+  reviewer sees is exactly what an upload produces, and the seed cannot drift from the
+  importer. Re-runnable (exits 0 if the owner already has templates, `--force` to override)
+  so it is safe on every deploy, and `--dry-run` parses without writing.
+- **Seeded and verified through the public API, not just the database.** The live stack now
+  returns the full tree: 13 sections / 69 items / 392 comments / 520 options and 4 import
+  issues, matching the canonical figures from Phases 2 and 5 exactly. Confirmed
+  `GET /api/templates`, `GET /api/templates/{id}`, and `GET .../import-issues` serve the
+  seeded data, then cleaned the test copy back out.
+- **Re-verified the two baseline behaviours the assignment calls out by name** against the
+  seeded template: an edit persists, and a duplicate is genuinely independent (distinct
+  template *and* section ids; editing the copy left the original untouched). One scare
+  during this check was my own test script, not the code: it indexed `[0]` into a list
+  ordered by `updated_at DESC`, so after editing the copy it read the copy back and looked
+  like the original had been mutated. The database showed distinct section ids and
+  untouched original content — copy independence was never broken. Restored the section
+  name afterwards, so the seeded template is in its as-imported state.
+- **Proved the importer works beyond the one committed template.** The brief says "We may
+  try another export in the same HTML-text format", and until now every importer test ran
+  against the same InterNACHI file, so the honest limitation was "verified on one export
+  only". Added `sample-data/commercial-rental.xml` — a synthetic export in the identical
+  SpreadsheetML format, but structurally unlike the canonical one: 12 columns instead of
+  42 (every optional column the importer models is absent), a different template, and one
+  extra column the importer has no home for. It imports correctly, which is the evidence
+  that the mapping is header-driven rather than tuned to InterNACHI. It also carries four
+  dirty values that each surface as an issue instead of being silently coerced. Six new
+  `test_second_export_*` tests pin all of it.
+- **Confirmed the reviewer's artifacts are present and correct:** the real Spectora
+  InterNACHI Residential export is committed at `sample-data/sheet1.xml` (338 KB) with
+  provenance in `sample-data/README.md`; `assignment.md` is correctly *not* tracked
+  (`.gitignore`); no `__pycache__`/`.pytest_cache`/`.ruff_cache` is tracked; no `.env` is
+  tracked.
+
+## Supported input and known limitations
+
+- **Supported input:** the Spectora "Export HTML Text" (SpreadsheetML worksheet) format
+  that `sample-data/sheet1.xml` uses, i.e. a single worksheet whose row 1 is a header
+  describing each column. The importer is column-driven, not template-driven: it maps by
+  header name, so a different Spectora template in the same format works without code
+  changes. Evidenced twice — the canonical InterNACHI export, and
+  `sample-data/commercial-rental.xml`, a deliberately different 12-column export that omits
+  every optional column the importer models. No *real* second vendor export was available to
+  test with, so the second fixture is synthetic.
+- **Preserved:** section/item/comment text, the full hierarchy, explicit ordering, comment
+  options, and per-row source references.
+- **Deliberate limits:** the worksheet format only (not the plain-text or XLSX exports);
+  a fixed set of known Spectora columns; cells that cannot be represented in the schema are
+  **surfaced as import issues, never dropped silently** — that is what the 4 issues on the
+  canonical file are (2 warnings for unrepresentable data, 2 info for empty source columns).
+- **Not built, on purpose:** actual inspection reports, scheduling, payments, and any
+  homeowner-facing surface (explicitly out of scope in the assignment), plus template
+  `delete` through the API (not in the contract; the repository method exists for tests and
+  seeding only).
+
+## What I cut and why
+
+- **AI in the import path.** The importer is deterministic. For this customer, a template
+  they tuned for four years is worth more if every row either lands or raises a visible
+  issue; a model that silently rewords or drops content is the worse failure. The
+  `TemplateImporter` protocol keeps the seam open if that judgement is wrong.
+- **A full template editor.** Editing section names, item names, and comment text covers the
+  baseline "Edit" requirement. Rich structural editing (reordering, adding items) was cut as
+  a non-technical inspector's real need being better served by making import trustworthy
+  first.
+- **Playwright/browser E2E.** Cut deliberately: the same flows are covered by 67 component
+  tests plus the live HTTP/CORS suite in `backend/tests/test_live_api_integration.py`, and
+  browser automation was a better use of the remaining time than more polish.
+- **Hosted CI execution and the deployed URL.** The workflow is written and every command it
+  runs passes locally, but opening a PR and deploying to Vercel/Render need the accounts;
+  both are recorded as CHECK BLOCKED rather than claimed as done.
+
+## Credits
+
+- **Spectora** — the InterNACHI Residential template export committed in `sample-data/` is
+  their sample material, used here as importer input.
+- **React + Vite frontend scaffold** — the React/TypeScript frontend was bootstrapped with
+  Lovable-assisted scaffolding; the API client, state layer, auth flow, template list/view/
+  edit/duplicate screens, import-issue UI, and their tests are project work.
+- Everything else (FastAPI backend, SQL migrations, Supabase schema, importer, repository,
+  CI) was written for this assignment. No third-party application code was vendored.
+
+## Time spent
+
+Roughly two focused days, matching the assignment's estimate, spent in the documented phase
+order: schema and migrations, backend domain/application, REST API, frontend, live-stack
+integration, and CI. The largest single cost was import fidelity — the importer work and the
+preservation checks behind the 13/69/392/520 figures.
+
+## Walkthrough outline
+
+A script for the 8-10 minute video, in the order the assignment asks for:
+
+1. **Intro** — who I am and what I built.
+2. **The workflow, on camera** — upload `sample-data/sheet1.xml`, show the template open
+   with its issues visible, rename a section and show it persisted, duplicate it and edit
+   the copy to show the original is untouched.
+3. **The repo** — monorepo layout, stack, the Lovable-assisted frontend, and that AI coding
+   tools (OpenCode) were used throughout.
+4. **The data model** — templates → sections → items → comments → options, the column-driven
+   mapping, and how preservation was checked against the committed export.
+5. **Decisions** — deterministic importer over AI, the editor scope cut, the trust-focused
+   improvement, and what was deliberately left out.
+6. **The hard part** — unrepresentable source columns surfacing as import issues rather than
+   being dropped, shown live, plus the invalid-upload failure case.
+7. **Hive feedback** — direct, specific, short.
+
 ## Open questions
 
-- Phase 6 (CI/CD + deployment validation) is next: extend the existing CI frontend job to
-  run the same gates used locally (`npm run lint`, `npm run typecheck`, `npm test`,
-  `npm run build`), and validate the deployment wiring (`CORS_ORIGINS` for the Vercel
-  origin, `VITE_API_BASE_URL` against the deployed API).
+- Phase 6 CI work is done; what remains is the hosted side: open a PR so GitHub Actions
+  runs the new jobs, and validate a real deployment (`CORS_ORIGINS` for the Vercel origin,
+  `VITE_API_BASE_URL` against the deployed API) once hostnames exist.
 - Real Supabase Auth E2E is still pending the project's public anon key — see the Phase 5
   entry for exactly what is needed.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.
