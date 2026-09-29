@@ -329,6 +329,109 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   API. `docs/deployment.md` states both requirements; the values themselves are deployment
   secrets/environment settings, not repository content.
 
+## 2026-09-29 — Phase 7 (final assignment verification)
+
+Audit of the build against `assignment.md`, item by item. This is the pass that found the
+one thing that would have cost real marks, so it is worth recording what was checked.
+
+- **The live app had nothing to open on.** The assignment requires the deployed app to
+  "open on an imported template" and the database was empty (0 templates) after Phase 5
+  cleaned up after itself. Added `backend/scripts/seed_sample_template.py`, which imports
+  `sample-data/sheet1.xml` through the *real* `SpectoraXlsxImporter` and persists it through
+  the *real* `PostgresTemplateRepository` — deliberately not hand-written SQL, so what the
+  reviewer sees is exactly what an upload produces, and the seed cannot drift from the
+  importer. Re-runnable (exits 0 if the owner already has templates, `--force` to override)
+  so it is safe on every deploy, and `--dry-run` parses without writing.
+- **Seeded and verified through the public API, not just the database.** The live stack now
+  returns the full tree: 13 sections / 69 items / 392 comments / 520 options and 4 import
+  issues, matching the canonical figures from Phases 2 and 5 exactly. Confirmed
+  `GET /api/templates`, `GET /api/templates/{id}`, and `GET .../import-issues` serve the
+  seeded data, then cleaned the test copy back out.
+- **Re-verified the two baseline behaviours the assignment calls out by name** against the
+  seeded template: an edit persists, and a duplicate is genuinely independent (distinct
+  template *and* section ids; editing the copy left the original untouched). One scare
+  during this check was my own test script, not the code: it indexed `[0]` into a list
+  ordered by `updated_at DESC`, so after editing the copy it read the copy back and looked
+  like the original had been mutated. The database showed distinct section ids and
+  untouched original content — copy independence was never broken. Restored the section
+  name afterwards, so the seeded template is in its as-imported state.
+- **Confirmed the reviewer's artifacts are present and correct:** the real Spectora
+  InterNACHI Residential export is committed at `sample-data/sheet1.xml` (338 KB) with
+  provenance in `sample-data/README.md`; `assignment.md` is correctly *not* tracked
+  (`.gitignore`); no `__pycache__`/`.pytest_cache`/`.ruff_cache` is tracked; no `.env` is
+  tracked.
+
+## Supported input and known limitations
+
+- **Supported input:** the Spectora "Export HTML Text" (SpreadsheetML worksheet) format
+  that `sample-data/sheet1.xml` uses, i.e. a single worksheet whose row 1 is a header
+  describing each column. The importer is column-driven, not template-driven: it maps by
+  header name, so a different Spectora template in the same format works without code
+  changes. Verified against the canonical export only — no second vendor export was
+  available to test with.
+- **Preserved:** section/item/comment text, the full hierarchy, explicit ordering, comment
+  options, and per-row source references.
+- **Deliberate limits:** the worksheet format only (not the plain-text or XLSX exports);
+  a fixed set of known Spectora columns; cells that cannot be represented in the schema are
+  **surfaced as import issues, never dropped silently** — that is what the 4 issues on the
+  canonical file are (2 warnings for unrepresentable data, 2 info for empty source columns).
+- **Not built, on purpose:** actual inspection reports, scheduling, payments, and any
+  homeowner-facing surface (explicitly out of scope in the assignment), plus template
+  `delete` through the API (not in the contract; the repository method exists for tests and
+  seeding only).
+
+## What I cut and why
+
+- **AI in the import path.** The importer is deterministic. For this customer, a template
+  they tuned for four years is worth more if every row either lands or raises a visible
+  issue; a model that silently rewords or drops content is the worse failure. The
+  `TemplateImporter` protocol keeps the seam open if that judgement is wrong.
+- **A full template editor.** Editing section names, item names, and comment text covers the
+  baseline "Edit" requirement. Rich structural editing (reordering, adding items) was cut as
+  a non-technical inspector's real need being better served by making import trustworthy
+  first.
+- **Playwright/browser E2E.** Cut deliberately: the same flows are covered by 67 component
+  tests plus the live HTTP/CORS suite in `backend/tests/test_live_api_integration.py`, and
+  browser automation was a better use of the remaining time than more polish.
+- **Hosted CI execution and the deployed URL.** The workflow is written and every command it
+  runs passes locally, but opening a PR and deploying to Vercel/Render need the accounts;
+  both are recorded as CHECK BLOCKED rather than claimed as done.
+
+## Credits
+
+- **Spectora** — the InterNACHI Residential template export committed in `sample-data/` is
+  their sample material, used here as importer input.
+- **React + Vite frontend scaffold** — the React/TypeScript frontend was bootstrapped with
+  Lovable-assisted scaffolding; the API client, state layer, auth flow, template list/view/
+  edit/duplicate screens, import-issue UI, and their tests are project work.
+- Everything else (FastAPI backend, SQL migrations, Supabase schema, importer, repository,
+  CI) was written for this assignment. No third-party application code was vendored.
+
+## Time spent
+
+Roughly two focused days, matching the assignment's estimate, spent in the documented phase
+order: schema and migrations, backend domain/application, REST API, frontend, live-stack
+integration, and CI. The largest single cost was import fidelity — the importer work and the
+preservation checks behind the 13/69/392/520 figures.
+
+## Walkthrough outline
+
+A script for the 8-10 minute video, in the order the assignment asks for:
+
+1. **Intro** — who I am and what I built.
+2. **The workflow, on camera** — upload `sample-data/sheet1.xml`, show the template open
+   with its issues visible, rename a section and show it persisted, duplicate it and edit
+   the copy to show the original is untouched.
+3. **The repo** — monorepo layout, stack, the Lovable-assisted frontend, and that AI coding
+   tools (OpenCode) were used throughout.
+4. **The data model** — templates → sections → items → comments → options, the column-driven
+   mapping, and how preservation was checked against the committed export.
+5. **Decisions** — deterministic importer over AI, the editor scope cut, the trust-focused
+   improvement, and what was deliberately left out.
+6. **The hard part** — unrepresentable source columns surfacing as import issues rather than
+   being dropped, shown live, plus the invalid-upload failure case.
+7. **Hive feedback** — direct, specific, short.
+
 ## Open questions
 
 - Phase 6 CI work is done; what remains is the hosted side: open a PR so GitHub Actions
