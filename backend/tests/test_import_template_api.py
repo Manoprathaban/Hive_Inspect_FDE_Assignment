@@ -282,6 +282,9 @@ def test_importer_failure_is_422_invalid_xlsx() -> None:
 def test_real_spectora_worksheet_imports_end_to_end() -> None:
     from pathlib import Path
 
+    # Real importer through the app; a fresh in-memory repository keeps the API test
+    # hermetic (the Postgres adapter has its own dedicated live-DB suite).
+    _stub()
     repo_root = Path(__file__).resolve().parents[2]
     worksheet = (repo_root / "sample-data" / "sheet1.xml").read_bytes()
     response = client.post(

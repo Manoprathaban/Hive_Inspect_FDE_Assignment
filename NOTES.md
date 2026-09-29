@@ -40,7 +40,8 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
 ## Tech stack (locked)
 
 - Frontend: React + TypeScript (Lovable-assisted), independent from the backend.
-- Backend: Python, FastAPI, Pydantic, Uvicorn; SQLAlchemy + asyncpg for PostgreSQL later.
+- Backend: Python, FastAPI, Pydantic, Uvicorn; SQLAlchemy (async) + asyncpg wired for
+  PostgreSQL in the repository-adapter phase.
 - DB: PostgreSQL on Supabase (managed hosting layer only — not the app backend). Schema in
   `database/migrations/` (plain SQL, applied in numeric order).
 - AI: Gemini only where it adds real value, always behind a replaceable service boundary.
@@ -143,10 +144,53 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   residuals remain (`ignored_auth`, and 415 `INVALID_FILE` on the unrecognized `file`
   part).
 
+## 2026-09-29 — Postgres repository adapter
+
+- Implemented the PostgreSQL `TemplateRepository` adapter as a single self-contained module,
+  `backend/app/adapters/repositories/postgres.py` (SQLAlchemy 2.0 async + asyncpg engine).
+  No ORM mapping: every operation is a raw SQLAlchemy Core `text()` statement following the
+  parameterized query patterns in `docs/DATABASE_DESIGN.md` §20, and a connection is opened
+  lazily per operation so building the app never connects to Postgres.
+- Implements the full `TemplateRepository` protocol: `save` (one transaction persisting the
+  aggregate with fresh ids down the tree), `get`, `list_for_user` (newest `updated_at`
+  first, `id` tiebreak), `list_import_issues` (`created_at DESC, id DESC`), the three
+  `update_*` single-row edits, `duplicate` (one transaction, new ids everywhere,
+  `copied_from_id` provenance, own timestamps, no issues, default `<source> (Copy)` name),
+  and an owner-scoped `delete`.
+- Ownership is enforced inside every statement — child rows by an `EXISTS` that walks the
+  parent chain to the template owner — so missing **or** foreign templates and unresolvable
+  child ids produce the exact same 404 mapping as the in-memory adapter
+  (`TemplateNotFoundError`, then child-specific `SectionNotFoundError`/
+  `ItemNotFoundError`/`CommentNotFoundError`); edits never touch `templates`, so
+  `updated_at` stays stable (§21). RLS (`0002`) remains defense in depth, never the app's
+  ownership mechanism.
+- Wiring: `app/api/dependencies/providers.py` binds one process-wide
+  `PostgresTemplateRepository(get_async_engine())`; the engine comes from
+  `app/infrastructure/database` (asyncpg URL from `Settings.database_url`, local-dev
+  default) and is shared via `lru_cache`. SQLAlchemy constructs the engine without
+  connecting, and `database_url` has a default, so offline imports and the in-memory
+  overrides in the test suite are unaffected.
+- Tests: new `backend/tests/test_postgres_repository.py` — a live-PostgreSQL suite that
+  mirrors the `database/tests` harness: each test creates a throwaway database, applies the
+  versioned migrations in order, and drops it on teardown. It skips itself when no server
+  is reachable (`TEST_DATABASE_ADMIN_URL`, defaulting to the local dev credentials) so the
+  offline run and CI's backend job stay green. It covers the save→get round trip
+  (including an end-to-end pass of the canonical Spectora export), cross-user isolation,
+  list/issue ordering, single-row edit semantics and child-specific 404s, transactional
+  duplicate independence, and cascade delete.
+- Docs updated: `docs/architecture.md` (adapter boundary), `docs/API-CONTRACTS.md`
+  (§9/§25 now "CONTRACT AS IMPLEMENTED," Postgres-backed), `docs/DATABASE_DESIGN.md`
+  (§19 item removed; validation-status banner and §18 now reflect the live-Postgres
+  harness and migration runs).
+
 ## Open questions
 
-- Next phase: the Postgres repository adapter (SQLAlchemy/asyncpg) implementing the same
-  owner-scoped protocol — reads, edits, duplicate, import issues — so mutations have a
-  real store instead of the in-memory adapter.
-- Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs. a
-  tool like Alembic/`supabase db push` — plain SQL chosen for now.
+- Next phase: wire real token validation into the production authentication provider
+  (the dev stub fails closed today; see `docs/BACKEND_DESIGN.md` /
+  `docs/API-CONTRACTS.md` §24), or begin frontend integration
+  (`docs/FRONTEND_DESIGN.md`).
+- Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.
+  a tool like Alembic/`supabase db push` — plain SQL chosen for now.
+- Deliberately out of scope until its phase: exposing template `delete` through the API
+  (the contract does not define a delete route; the repository's owner-scoped `delete`
+  exists for the database boundary and is covered by the live suite).

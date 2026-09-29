@@ -8,9 +8,10 @@ the assignment's *schema/database foundation* step only.
 - Seed: `database/seed/dev_auth.sql`
 - Domain/protocol code: `backend/app/domain/`, `backend/app/protocols/`
 
-> **Validation status:** no PostgreSQL/Supabase instance was available in this environment,
-> so migrations and RLS were validated **statically** (PostgreSQL grammar parse via
-> `pglast`). They were not executed against a live database; see §17.
+> **Validation status:** migrations and RLS were validated statically (PostgreSQL grammar
+> parse via `pglast`) and then executed against a live local PostgreSQL instance: schema,
+> FKs, cascades, triggers, seeds, and RLS cross-user checks are exercised by the harness in
+> `database/tests` (`make db-test`), which runs in CI; see §17.
 
 ---
 
@@ -557,8 +558,10 @@ trace.
 - **Secrets:** none in migrations, seeds, or source. `SUPABASE_URL`/service-role key live
   only in backend environment variables, and the service-role key is never shipped to the
   frontend. The frontend gets only owner-scoped data through the API.
-- **Validation performed:** static (pglast) only — no live database for cross-user
-  SELECT/UPDATE/DELETE/INSERT rejection checks or cascade verification.
+- **Validation performed:** static (pglast) plus a live Postgres harness in
+  `database/tests` for cross-user SELECT/UPDATE/DELETE/INSERT rejection checks and
+  cascade/trigger verification (executed against the project's local Postgres instance
+  and in CI; assignment-copy fallbacks documented in §17).
 
 ---
 
@@ -567,8 +570,6 @@ trace.
 - Spectora XLSX importer, Excel/HTML parsing, import UI, and template editor UI.
 - REST API routes, auth UI/login screens (the provider boundary and dev stub exist).
 - Full `SupabaseAuthProvider` JWT validation (stub fails closed).
-- The PostgreSQL repository adapter (SQLAlchemy/asyncpg) implementing `TemplateRepository`
-  (schema + contract exist; adapter is the next step).
 - AI/Gemini, reporting, inspections, scheduling, customers, properties, payments,
   notifications, analytics, caching infrastructure, microservices.
 

@@ -55,8 +55,9 @@ adapter can satisfy it.
   ```
 
 - **`TemplateRepository`** (`protocols/repositories/`)
-  Persistence boundary for templates. Supabase-backed and in-memory adapters can both
-  satisfy it.
+  Persistence boundary for templates. A PostgreSQL adapter
+  (`adapters/repositories/postgres.py`, SQLAlchemy async + asyncpg) and an in-memory
+  adapter (`adapters/repositories/in_memory.py`, tests/offline) both satisfy it.
 
 ### Reserved for later (no code yet)
 

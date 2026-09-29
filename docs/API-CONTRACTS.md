@@ -798,7 +798,7 @@ The contract is implementable directly with FastAPI + Pydantic:
 - `POST /api/templates/import` — full §9.3 pipeline: `multipart/form-data` `file`,
   10 MiB cap, extension+content container validation (`415`/`413`), importer-driven
   structure validation (`422 INVALID_XLSX`), atomic persist through an owner-scoped
-  repository (in-memory adapter for now; Postgres adapter later), `201 ImportResult`
+  repository (Postgres adapter, `app/adapters/repositories/postgres.py`), `201 ImportResult`
   with `Location`, and the §14 error envelope (including
   `422 VALIDATION_ERROR` for a missing/malformed request body).
 - The error-envelope exception handlers and the bearer-auth dependency
@@ -826,17 +826,24 @@ The contract is implementable directly with FastAPI + Pydantic:
   A missing/foreign template is `404 TEMPLATE_NOT_FOUND`; once the owned template is
   verified, an unresolved child id is the child-specific `404 SECTION_NOT_FOUND` /
   `ITEM_NOT_FOUND` / `COMMENT_NOT_FOUND` (§20).
-- The repository adapter situation: `insert`, `fetch`, `list`, issue reads, `update_*`,
-  and `duplicate` are implemented in the in-memory adapter; `delete` is not exposed by
-  the contract and still raises `NotImplementedError` (fails loudly, never no-ops).
+- The repository adapter situation: the PostgreSQL adapter
+  (`app/adapters/repositories/postgres.py`, SQLAlchemy async + asyncpg, wired through
+  `app/infrastructure/database`) implements every protocol method — `save`, `get`,
+  `list_for_user`, `list_import_issues`, `update_section_name`, `update_item_name`,
+  `update_comment_content`, `duplicate` (transactional, §17), and the owner-scoped
+  `delete` (not exposed by the contract). Its SQL follows the parameterized patterns in
+  `DATABASE_DESIGN.md` §20; docs/API-CONTRACTS §20/§21 semantics (indistinguishable
+  missing/foreign template, child-specific 404s, single-row edits that never bump
+  template timestamps) match the in-memory adapter exactly. The in-memory adapter remains
+  for offline tests; its `delete` still raises `NotImplementedError` (fails loudly).
 
-### CONTRACT DEFINED FOR NEXT IMPLEMENTATION (to be built against this contract)
+### CONTRACT AS IMPLEMENTED
 
-- The Postgres repository adapter backing the above (reads, edits, duplicate, import
-  issues), wired through `infrastructure/database`.
+All §9 operations — import, list, get, import-issues, duplicate, and the three PATCHes —
+are implemented against this contract, backed by the PostgreSQL repository adapter.
 
-> Nothing in this section is operational until the backend implementation phase lands.
-> This document freezes the target, it does not claim delivery.
+> Implementation status: the backend phase has landed; this document freezes the target
+> contract it was built against.
 
 ---
 

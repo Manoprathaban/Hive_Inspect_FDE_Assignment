@@ -378,6 +378,9 @@ def test_edit_endpoints_require_auth(method: str, path: str) -> None:
 
 
 def test_import_then_duplicate_and_edit_end_to_end() -> None:
+    # Real importer through the app with a fresh in-memory repository (hermetic; the
+    # PostgreSQL adapter is covered by the dedicated live-DB suite).
+    _stub()
     worksheet = (REPO_ROOT / "sample-data" / "sheet1.xml").read_bytes()
     imported = client.post(
         "/api/templates/import",

@@ -248,8 +248,10 @@ def test_405_unsupported_method_advertises_allow() -> None:
 
 
 def test_import_then_read_back_end_to_end() -> None:
-    # No importer/repository override: the real importer + in-memory repository serve both
-    # the import and the reads, proving Location + GET + import-issues agree.
+    # Real importer + a fresh in-memory repository serve both the import and the reads,
+    # proving Location + GET + import-issues agree (the API suite stays hermetic; live
+    # Postgres coverage lives in test_postgres_repository.py).
+    _stub()
     worksheet = (REPO_ROOT / "sample-data" / "sheet1.xml").read_bytes()
     imported = client.post(
         "/api/templates/import",
