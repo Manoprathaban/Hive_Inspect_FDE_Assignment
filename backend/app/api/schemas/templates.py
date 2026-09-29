@@ -1,10 +1,11 @@
-﻿"""HTTP response schemas for the template API (presentation layer).
+﻿"""HTTP request/response schemas for the template API (presentation layer).
 
-Mirror ``docs/API-CONTRACTS.md`` §13 exactly (Pydantic v2, ``extra="forbid"``). Field
+Mirror ``docs/API-CONTRACTS.md`` §12/§13 exactly (Pydantic v2, ``extra="forbid"``). Field
 names match the database/domain; exclusions follow the contract: ``owner_id`` and FK
 columns are never exposed, and the nested Template payload (``TemplateResponse``) never
 carries ``import_issues`` — issues travel at the top level of ``ImportResultResponse``
-and via the dedicated import-issues endpoint.
+and via the dedicated import-issues endpoint. Request bodies enforce §12 field semantics
+(trimmed 1–200 names; ``content`` is free-form and verbatim).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.models.template import (
     AnswerType,
@@ -30,7 +31,48 @@ from app.domain.models.template import (
     TemplateSummary,
 )
 
-__all__ = ["ImportResultResponse", "TemplateResponse", "TemplateSummaryResponse"]
+__all__ = [
+    "DuplicateRequest",
+    "EditCommentRequest",
+    "ImportResultResponse",
+    "RenameRequest",
+    "TemplateResponse",
+    "TemplateSummaryResponse",
+]
+
+
+class RenameRequest(BaseModel):
+    """Rename body for sections/items, §12.1: ``{"name": str}``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _name_trimmed_1_200(cls, value: str) -> str:
+        return _trimmed_name(value)
+
+
+class EditCommentRequest(BaseModel):
+    """Edit body for comments, §12.2: ``{"content": str}`` (empty clears)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+
+
+class DuplicateRequest(BaseModel):
+    """Optional duplicate body, §12.3: ``{"name": str | null}``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _name_optional_trimmed_1_200(cls, value: str | None) -> str | None:
+        return _trimmed_name(value) if value is not None else None
 
 
 class CommentOptionResponse(BaseModel):
@@ -253,3 +295,17 @@ def _required_timestamp(value: datetime | None) -> datetime:
 
 def _to_float(value: Decimal | None) -> float | None:
     return float(value) if value is not None else None
+
+
+def _trimmed_name(value: str) -> str:
+    """Validate §12: a name is trimmed and 1–200 characters after trimming.
+
+    ``null`` fails type validation earlier (422); an empty or whitespace-only string and
+    an over-long name raise a validation error that FastAPI turns into ``422
+    VALIDATION_ERROR``. The returned value is the stored, trimmed name.
+    """
+
+    trimmed = value.strip()
+    if not 1 <= len(trimmed) <= 200:
+        raise ValueError("must be 1-200 characters after trimming")
+    return trimmed

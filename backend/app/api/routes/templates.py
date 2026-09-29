@@ -9,6 +9,18 @@ Read paths (``docs/API-CONTRACTS.md`` §9.1/§9.2/§11):
 * ``GET /api/templates/{id}/import-issues`` — persisted diagnostics, newest first;
   ``404 TEMPLATE_NOT_FOUND`` when the template is missing/foreign.
 
+Edit paths (§9.4/§10/§17):
+
+* ``POST /api/templates/{id}/duplicate`` — independent deep copy (§17); optional
+  ``{"name"}`` body (§12.3); ``201`` + the new template (§13.2) and a ``Location`` header.
+* ``PATCH /api/templates/{id}/sections/{section_id}`` / ``.../items/{item_id}`` —
+  ``{"name"}`` (trimmed 1–200, §10.1/§10.2); ``204``.
+* ``PATCH /api/templates/{id}/comments/{comment_id}`` — ``{"content"}`` (verbatim, empty
+  clears, §10.3); ``204``.
+* Ownership mapping: a missing/foreign template is ``404 TEMPLATE_NOT_FOUND``; a child id
+  that does not resolve under the verified-owned template is the child-specific
+  ``404 SECTION_NOT_FOUND`` / ``ITEM_NOT_FOUND`` / ``COMMENT_NOT_FOUND`` (§20).
+
 Import path (``docs/API-CONTRACTS.md`` §9.3/§18):
 
 * ``422 VALIDATION_ERROR`` — the ``file`` part is missing (FastAPI ``File(...)``).
@@ -31,7 +43,8 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Response, UploadFile, status
+from fastapi import APIRouter, Body, Depends, File, Response, UploadFile, status
+from fastapi.responses import JSONResponse
 
 from app.api.dependencies.auth import get_current_user
 from app.api.dependencies.providers import (
@@ -40,24 +53,39 @@ from app.api.dependencies.providers import (
 )
 from app.api.errors import ApiError
 from app.api.schemas.templates import (
+    DuplicateRequest,
+    EditCommentRequest,
     ImportIssueResponse,
     ImportResultResponse,
+    RenameRequest,
     TemplateResponse,
     TemplateSummaryResponse,
 )
 from app.application.use_cases.import_template import ImportTemplateUseCase
-from app.domain.exceptions import TemplateImportError
+from app.domain.exceptions import (
+    CommentNotFoundError,
+    ItemNotFoundError,
+    SectionNotFoundError,
+    TemplateImportError,
+    TemplateNotFoundError,
+)
 from app.domain.models.user import UserContext
 from app.infrastructure.config.settings import get_settings
 from app.protocols.repositories.template_repository import TemplateRepository
 
-__all__ = ["router"]
+__all__ = ["import_guard_router", "router"]
 
 router = APIRouter(
     prefix="/templates",
     tags=["templates"],
     dependencies=[Depends(get_current_user)],
 )
+
+# Route guard for the fixed "/import" resource, registered ahead of the main router and
+# deliberately WITHOUT the auth dependency: unsupported methods on it must answer 405 no
+# matter what (or who) attempts them (matching Starlette's own method-level 405), rather
+# than being shadowed by GET /{template_id} or short-circuited by 401/422.
+import_guard_router = APIRouter(prefix="/templates", tags=["templates"])
 
 _MAX_UPLOAD_BYTES = get_settings().max_upload_bytes
 _ZIP_MAGIC = b"PK\x03\x04"
@@ -163,6 +191,28 @@ async def import_template(
     return ImportResultResponse.from_domain(saved)
 
 
+@import_guard_router.api_route(
+    "/import",
+    methods=["GET", "HEAD", "OPTIONS", "PUT", "PATCH", "DELETE", "TRACE"],
+    include_in_schema=False,
+)
+async def import_only_supports_post() -> JSONResponse:
+    """Return ``405`` for methods the import resource does not support.
+
+    Without this route, ``GET /api/templates/import`` would be shadowed by the
+    ``GET /api/templates/{template_id}`` route (``import`` is not a UUID, so the endpoint
+    would answer ``422`` as if it were a malformed template id). The import endpoint is a
+    ``POST``-only resource (§9.3); an unsupported method must be ``405`` with an honest
+    ``Allow`` header, not a path-parameter validation error.
+    """
+
+    return JSONResponse(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        content={"detail": "Method Not Allowed"},
+        headers={"Allow": "POST"},
+    )
+
+
 @router.get(
     "",
     response_model=list[TemplateSummaryResponse],
@@ -236,3 +286,134 @@ async def list_import_issues(
         )
     issues = await repository.list_import_issues(template_id, owner_id=user.user_id)
     return [ImportIssueResponse.from_domain(issue) for issue in issues]
+
+
+@router.post(
+    "/{template_id}/duplicate",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TemplateResponse,
+    responses={
+        401: {"description": "Authentication required"},
+        404: {"description": "Source template missing or not owned (indistinguishable)"},
+        422: {"description": "Invalid body, or template_id is not a valid UUID"},
+        500: {"description": "Internal error"},
+    },
+)
+async def duplicate_template(
+    template_id: uuid.UUID,
+    body: Annotated[DuplicateRequest | None, Body()] = None,
+    repository: Annotated[TemplateRepository, Depends(get_template_repository)] = None,
+    response: Response = None,
+    user: Annotated[UserContext, Depends(get_current_user)] = None,
+) -> TemplateResponse:
+    """Create an independent deep copy of a template (§9.4/§17)."""
+
+    try:
+        copy = await repository.duplicate(
+            template_id,
+            owner_id=user.user_id,
+            new_name=body.name if body is not None else None,
+        )
+    except TemplateNotFoundError as exc:
+        raise ApiError(404, "TEMPLATE_NOT_FOUND", "Template was not found.") from exc
+    response.headers["Location"] = f"/api/templates/{copy.id}"
+    return TemplateResponse.from_domain(copy)
+
+
+@router.patch(
+    "/{template_id}/sections/{section_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"description": "Authentication required"},
+        404: {"description": "Template or section not found (distinct codes, §20)"},
+        422: {"description": "Invalid body, or a path id is not a valid UUID"},
+        500: {"description": "Internal error"},
+    },
+)
+async def rename_section(
+    template_id: uuid.UUID,
+    section_id: uuid.UUID,
+    body: RenameRequest,
+    repository: Annotated[TemplateRepository, Depends(get_template_repository)] = None,
+    user: Annotated[UserContext, Depends(get_current_user)] = None,
+) -> Response:
+    """Rename a section (single-row edit, §10.1)."""
+
+    try:
+        await repository.update_section_name(
+            template_id=template_id,
+            section_id=section_id,
+            owner_id=user.user_id,
+            name=body.name,
+        )
+    except TemplateNotFoundError as exc:
+        raise ApiError(404, "TEMPLATE_NOT_FOUND", "Template was not found.") from exc
+    except SectionNotFoundError as exc:
+        raise ApiError(404, "SECTION_NOT_FOUND", "Section was not found.") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/{template_id}/items/{item_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"description": "Authentication required"},
+        404: {"description": "Template or item not found (distinct codes, §20)"},
+        422: {"description": "Invalid body, or a path id is not a valid UUID"},
+        500: {"description": "Internal error"},
+    },
+)
+async def rename_item(
+    template_id: uuid.UUID,
+    item_id: uuid.UUID,
+    body: RenameRequest,
+    repository: Annotated[TemplateRepository, Depends(get_template_repository)] = None,
+    user: Annotated[UserContext, Depends(get_current_user)] = None,
+) -> Response:
+    """Rename an item (single-row edit, §10.2)."""
+
+    try:
+        await repository.update_item_name(
+            template_id=template_id,
+            item_id=item_id,
+            owner_id=user.user_id,
+            name=body.name,
+        )
+    except TemplateNotFoundError as exc:
+        raise ApiError(404, "TEMPLATE_NOT_FOUND", "Template was not found.") from exc
+    except ItemNotFoundError as exc:
+        raise ApiError(404, "ITEM_NOT_FOUND", "Item was not found.") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch(
+    "/{template_id}/comments/{comment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses={
+        401: {"description": "Authentication required"},
+        404: {"description": "Template or comment not found (distinct codes, §20)"},
+        422: {"description": "Invalid body, or a path id is not a valid UUID"},
+        500: {"description": "Internal error"},
+    },
+)
+async def edit_comment(
+    template_id: uuid.UUID,
+    comment_id: uuid.UUID,
+    body: EditCommentRequest,
+    repository: Annotated[TemplateRepository, Depends(get_template_repository)] = None,
+    user: Annotated[UserContext, Depends(get_current_user)] = None,
+) -> Response:
+    """Replace a comment's content verbatim; empty string clears it (§10.3)."""
+
+    try:
+        await repository.update_comment_content(
+            template_id=template_id,
+            comment_id=comment_id,
+            owner_id=user.user_id,
+            content=body.content,
+        )
+    except TemplateNotFoundError as exc:
+        raise ApiError(404, "TEMPLATE_NOT_FOUND", "Template was not found.") from exc
+    except CommentNotFoundError as exc:
+        raise ApiError(404, "COMMENT_NOT_FOUND", "Comment was not found.") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

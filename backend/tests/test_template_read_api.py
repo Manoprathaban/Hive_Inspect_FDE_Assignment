@@ -240,9 +240,11 @@ def test_405_unsupported_method_advertises_allow() -> None:
     assert response.status_code == 405
     assert "GET" in response.headers["Allow"]
 
+    # The import resource is a POST-only endpoint; {template_id} is uuid-constrained, so
+    # its GET route must not shadow the fixed "/import" path (Allow advertises POST only).
     overlaid = client.request("TRACE", "/api/templates/import", headers=AUTH)
     assert overlaid.status_code == 405
-    assert {"GET", "POST"} <= set(overlaid.headers["Allow"].split(", "))
+    assert set(overlaid.headers["Allow"].split(", ")) == {"POST"}
 
 
 def test_import_then_read_back_end_to_end() -> None:

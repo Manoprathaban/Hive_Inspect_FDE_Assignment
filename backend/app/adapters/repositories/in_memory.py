@@ -2,7 +2,7 @@
 
 Test/development persistence for the template API before the Postgres adapter lands. An
 instance implements the :class:`~app.protocols.repositories.template_repository
-.TemplateRepository` shape for the read+write paths the current API phase needs:
+.TemplateRepository` shape for the read+write paths the API needs:
 
 * ``save`` — persists a new aggregate and returns it with real assigned UUIDs for the
   template and every descendant (sections/items/comments/options/issues), plus
@@ -12,12 +12,19 @@ instance implements the :class:`~app.protocols.repositories.template_repository
   returns issues newest-first; every issue in an import batch shares a timestamp, so the
   newest-first order is the reverse of aggregate insertion order (deterministic tiebreak,
   matching the Postgres ``ORDER BY created_at DESC``).
+* ``update_section_name`` / ``update_item_name`` / ``update_comment_content`` —
+  owner-scoped, single-row edits scoped to the given template; a missing **or** foreign
+  template raises :class:`~app.domain.exceptions.TemplateNotFoundError` and an unresolvable
+  child id raises the child-specific error (``SectionNotFoundError``/``ItemNotFoundError``/
+  ``CommentNotFoundError``), mirroring the §20/§17 contract mapping. Template-level
+  timestamps are not bumped: edits are single-row updates (§21).
+* ``duplicate`` — transactional-feeling deep copy with brand-new ids for the copy and every
+  descendant, ``copied_from_id`` pointing at the source (provenance only), its own
+  timestamps, no import issues, and ``"<source name> (Copy)"`` as the default name (§17).
 
-Mutation methods that later in-memory/Postgres phases will provide
-(``update_section_name``, ``update_item_name``, ``update_comment_content``, ``duplicate``,
-``delete``) raise :class:`NotImplementedError` so a missing capability fails loudly instead
-of silently becoming a no-op. State is process-local and non-durable: it exists so the API
-can be exercised offline, never as a production store.
+``delete`` is not exposed by the API contract, so it raises :class:`NotImplementedError`
+to fail loudly rather than silently no-op. State is process-local and non-durable: it
+exists so the API can be exercised offline, never as a production store.
 """
 
 from __future__ import annotations
@@ -26,6 +33,12 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 
+from app.domain.exceptions import (
+    CommentNotFoundError,
+    ItemNotFoundError,
+    SectionNotFoundError,
+    TemplateNotFoundError,
+)
 from app.domain.models.template import (
     Comment,
     CommentOption,
@@ -150,6 +163,18 @@ class InMemoryTemplateRepository:
     def __init__(self) -> None:
         self._templates: dict[uuid.UUID, Template] = {}
 
+    def _owned(self, template_id: uuid.UUID, owner_id: uuid.UUID) -> Template:
+        """Return the stored template or raise the generic not-found error.
+
+        Missing and foreign are the same failure (§20): an attacker can never distinguish
+        "exists but not yours" from "does not exist".
+        """
+
+        template = self._templates.get(template_id)
+        if template is None or template.owner_id != owner_id:
+            raise TemplateNotFoundError(template_id)
+        return template
+
     async def save(self, template: Template, *, owner_id: uuid.UUID) -> Template:
         """Persist ``template`` and return it with assigned ids/timestamps."""
 
@@ -205,7 +230,20 @@ class InMemoryTemplateRepository:
         owner_id: uuid.UUID,
         name: str,
     ) -> None:
-        raise NotImplementedError("section renaming lands with the template editor API")
+        """Rename a section owned by ``owner_id`` in ``template_id`` (single-row edit)."""
+
+        template = self._owned(template_id, owner_id)
+        if not any(section.id == section_id for section in template.sections):
+            raise SectionNotFoundError(section_id)
+        self._templates[template_id] = _clone(
+            replace(
+                template,
+                sections=[
+                    replace(section, name=name) if section.id == section_id else section
+                    for section in template.sections
+                ],
+            )
+        )
 
     async def update_item_name(
         self,
@@ -215,7 +253,26 @@ class InMemoryTemplateRepository:
         owner_id: uuid.UUID,
         name: str,
     ) -> None:
-        raise NotImplementedError("item renaming lands with the template editor API")
+        """Rename an item owned by ``owner_id`` in ``template_id`` (single-row edit)."""
+
+        template = self._owned(template_id, owner_id)
+        if not any(
+            item.id == item_id
+            for section in template.sections
+            for item in section.items
+        ):
+            raise ItemNotFoundError(item_id)
+        sections = [
+            replace(
+                section,
+                items=[
+                    replace(item, name=name) if item.id == item_id else item
+                    for item in section.items
+                ],
+            )
+            for section in template.sections
+        ]
+        self._templates[template_id] = _clone(replace(template, sections=sections))
 
     async def update_comment_content(
         self,
@@ -225,7 +282,36 @@ class InMemoryTemplateRepository:
         owner_id: uuid.UUID,
         content: str,
     ) -> None:
-        raise NotImplementedError("comment editing lands with the template editor API")
+        """Replace a comment's content within ``template_id`` (single-row edit)."""
+
+        template = self._owned(template_id, owner_id)
+        found = any(
+            comment.id == comment_id
+            for section in template.sections
+            for item in section.items
+            for comment in item.comments
+        )
+        if not found:
+            raise CommentNotFoundError(comment_id)
+        sections = [
+            replace(
+                section,
+                items=[
+                    replace(
+                        item,
+                        comments=[
+                            replace(comment, content=content)
+                            if comment.id == comment_id
+                            else comment
+                            for comment in item.comments
+                        ],
+                    )
+                    for item in section.items
+                ],
+            )
+            for section in template.sections
+        ]
+        self._templates[template_id] = _clone(replace(template, sections=sections))
 
     async def duplicate(
         self,
@@ -234,7 +320,28 @@ class InMemoryTemplateRepository:
         owner_id: uuid.UUID,
         new_name: str | None = None,
     ) -> Template:
-        raise NotImplementedError("duplication lands with the duplicate API phase")
+        """Create an independent deep copy of an owned template (§17).
+
+        The copy gets brand-new ids for the template and every descendant, its own
+        timestamps, ``copied_from_id`` = the source id (provenance only), no import issues,
+        and ``"<source name> (Copy)"`` when ``new_name`` is omitted.
+        """
+
+        template = self._owned(template_id, owner_id)
+        now = datetime.now(UTC)
+        name = new_name if new_name is not None else f"{template.name} (Copy)"
+        copy = _materialize(
+            replace(
+                template,
+                name=name,
+                copied_from_id=template.id,
+                issues=[],
+            ),
+            owner_id=owner_id,
+            now=now,
+        )
+        self._templates[copy.id] = _clone(copy)
+        return _clone(copy)
 
     async def delete(self, template_id: uuid.UUID, *, owner_id: uuid.UUID) -> bool:
         raise NotImplementedError("deletion is not exposed by the API contract")

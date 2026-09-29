@@ -104,11 +104,49 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   known `415 INVALID_FILE` on a schema-compliant `file` part whose filename is not a
   recognized container — the contract-required §18 response.
 
+## 2026-09-29 — Template editor API
+
+- Implemented the write/edit surface (§9.4/§10/§17) in the in-memory-backed repository:
+  `POST /api/templates/{id}/duplicate` and the three PATCHes
+  (`.../sections/{id}`, `.../items/{id}`, `.../comments/{id}`).
+- Duplicate (§17): ownership-scoped deep copy with brand-new ids for the template and
+  every descendant, own timestamps, `copied_from_id` provenance, **no** import issues
+  copied, default `"<source name> (Copy)"` or an optional trimmed 1–200 `{"name"}` body
+  (`null`/absent → default name); `201` + the new `Template` + `Location` header.
+- PATCHes (§10): exactly one required field per body (`{"name"}` sections/items trimmed
+  1–200; `{"content"}` comments verbatim, empty clears), `204` empty. Bodies reject extra
+  fields (`extra="forbid"`) → `422 VALIDATION_ERROR`.
+- §20 error mapping: missing/foreign template → `404 TEMPLATE_NOT_FOUND`; once the owned
+  template is verified, an unresolvable child id → child-specific `404 SECTION_NOT_FOUND` /
+  `ITEM_NOT_FOUND` / `COMMENT_NOT_FOUND`. Added four domain exceptions
+  (`TemplateNotFoundError`, `SectionNotFoundError`, `ItemNotFoundError`,
+  `CommentNotFoundError`) and mapped them in the routes.
+- §21: edits are single-row updates — the template's `updated_at` is **not** bumped
+  (repository and API tests both pin this).
+- Repository: `update_section_name`/`update_item_name`/`update_comment_content`/
+  `duplicate` now implemented behind a private `_owned` helper (missing/foreign raise
+  `TemplateNotFoundError`); `delete` stays `NotImplementedError` (not exposed by the
+  contract, fails loudly).
+- Tests: repository unit tests + a new `tests/test_template_edit_api.py` suite (duplicate
+  independence/Location/naming/404s/422s, PATCH persistence/trimming/404s, 401s, and an
+  import→duplicate→edit end-to-end against `sample-data/sheet1.xml`).
+- Coverage now 98% overall; `app/adapters/repositories/in_memory.py` at 99% (the single
+  miss is the unexposed `delete`).
+- Schemathesis on this phase surfaced two routing/schema quirks, both fixed properly:
+  (1) `GET /import` was being shadowed by `GET /{template_id}` (`import` isn't a UUID,
+  so it answered 422 instead of 405); a schema-hidden `import_guard_router` (no auth
+  dependency, registered ahead of the main router) now returns `405` + `Allow: POST` for
+  any non-`POST` method on the import resource while `/{template_id}` keeps its documented
+  `422` on non-UUID ids. (2) The empty-name 422s looked like rejections of
+  schema-compliant data; `RenameRequest.name`/`DuplicateRequest.name` now declare
+  `min_length=1, max_length=200` so OpenAPI encodes §12's bound. Only the two accepted
+  residuals remain (`ignored_auth`, and 415 `INVALID_FILE` on the unrecognized `file`
+  part).
+
 ## Open questions
 
-- Next phase: `POST /templates/{id}/duplicate` (transactional deep copy, §17) and the
-  three PATCH edit endpoints (§10), still in-memory-backed.
-- The Postgres repository adapter (SQLAlchemy/asyncpg) implementing the same owner-scoped
-  protocol lands with the write/edit surface so mutations have a real store.
+- Next phase: the Postgres repository adapter (SQLAlchemy/asyncpg) implementing the same
+  owner-scoped protocol — reads, edits, duplicate, import issues — so mutations have a
+  real store instead of the in-memory adapter.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs. a
   tool like Alembic/`supabase db push` — plain SQL chosen for now.

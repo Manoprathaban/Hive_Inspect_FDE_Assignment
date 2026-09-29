@@ -812,14 +812,28 @@ The contract is implementable directly with FastAPI + Pydantic:
   foreign template is always the same `404 TEMPLATE_NOT_FOUND` (§20).
 - Domain ids/timestamps required by §13 (§27 issue 1 resolution) and the
   `copied_from_id` field on `Template`.
-- The repository adapter situation: `insert`, `fetch`, `list`, and issue reads are
-  implemented; `update_*`/`duplicate`/`delete` land with their API phases (the in-memory
-  adapter raises `NotImplementedError` for them).
+- `POST /api/templates/{id}/duplicate` — ownership-scoped transactional deep copy (§9.4,
+  §17 semantics of the in-memory adapter): brand-new ids for the template and every
+  descendant, own timestamps, `copied_from_id` provenance, no import issues copied,
+  `"<source name> (Copy)"` default name or an optional trimmed 1–200 `{"name"}` body
+  (§12.3, `null`/absent allowed), `201` + the new `Template` (§13.2) + `Location` header.
+  Missing/foreign source is the generic `404 TEMPLATE_NOT_FOUND` (§20).
+- The three PATCH endpoints (§10, §20/§21): `PATCH /api/templates/{id}/sections/{section_id}`
+  and `.../items/{item_id}` rename (`{"name"}`, trimmed 1–200) with `204`;
+  `PATCH .../comments/{comment_id}` replaces `{"content"}` verbatim (empty string clears)
+  with `204`. Each is a single-row edit (template timestamps not bumped); the body schema
+  enforces exactly the one documented field and rejects extras (`422 VALIDATION_ERROR`).
+  A missing/foreign template is `404 TEMPLATE_NOT_FOUND`; once the owned template is
+  verified, an unresolved child id is the child-specific `404 SECTION_NOT_FOUND` /
+  `ITEM_NOT_FOUND` / `COMMENT_NOT_FOUND` (§20).
+- The repository adapter situation: `insert`, `fetch`, `list`, issue reads, `update_*`,
+  and `duplicate` are implemented in the in-memory adapter; `delete` is not exposed by
+  the contract and still raises `NotImplementedError` (fails loudly, never no-ops).
 
 ### CONTRACT DEFINED FOR NEXT IMPLEMENTATION (to be built against this contract)
 
-- `POST /templates/{id}/duplicate`, the three PATCH endpoints.
-- The Postgres repository adapter that backs them.
+- The Postgres repository adapter backing the above (reads, edits, duplicate, import
+  issues), wired through `infrastructure/database`.
 
 > Nothing in this section is operational until the backend implementation phase lands.
 > This document freezes the target, it does not claim delivery.
