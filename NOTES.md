@@ -301,12 +301,39 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   handoff is verified: the dev session, the `401` path, and the production provider's unit
   and API-wiring tests from Phase 3.
 
+## 2026-09-29 — Phase 6 (CI/CD + deployment validation)
+
+- **CI now mirrors the local gates.** `docs/deployment.md` previously claimed a frontend
+  pipeline of "typecheck + build" and treated migrations as optional. The workflow now runs
+  the real gate set on every push to `main` and every pull request that touches
+  `backend/**`, `frontend/**`, `database/**`, or the workflow file:
+  - backend: `ruff check .` → `ruff format --check .` → `pytest`
+  - frontend: `npm run lint` → `npm run typecheck` → `npm test` → `npm run build`
+  - database: migrations applied in order to a disposable PostgreSQL 17 service, then the
+    schema/RLS/ownership suite against that fresh database
+- **`ruff format` is now enforced, so the repo was formatted.** The backend had 44 files
+  that predated the formatter (a pre-existing, non-CI-enforced caveat) and 14 that already
+  matched. They are now all formatted, `ruff format --check .` is clean, and the workflow
+  will fail on drift. No behaviour changed: `144` tests collected, `134` passed / `10`
+  live-skipped, and app coverage is unchanged at `97%` (`1036` statements, `26` missed).
+- **npm and pip caches** are keyed on `frontend/package-lock.json` and
+  `backend/requirements.txt`, and no job is given secrets; deployment credentials stay in
+  the Render/Vercel secret stores.
+- **CHECK BLOCKED — no hosted CI run.** The workflow executes on `main` pushes and on pull
+  requests. This branch was pushed without opening a PR (not requested), so GitHub Actions
+  has not executed the new jobs. Every command they run was executed locally instead and
+  passes; a PR is the remaining trigger.
+- **CHECK BLOCKED — deployment wiring cannot be exercised from here.** Verifying the
+  Vercel/Render wiring needs the actual deployed hostnames: `CORS_ORIGINS` must equal the
+  exact frontend origin, and the frontend's `VITE_API_BASE_URL` must point at the deployed
+  API. `docs/deployment.md` states both requirements; the values themselves are deployment
+  secrets/environment settings, not repository content.
+
 ## Open questions
 
-- Phase 6 (CI/CD + deployment validation) is next: extend the existing CI frontend job to
-  run the same gates used locally (`npm run lint`, `npm run typecheck`, `npm test`,
-  `npm run build`), and validate the deployment wiring (`CORS_ORIGINS` for the Vercel
-  origin, `VITE_API_BASE_URL` against the deployed API).
+- Phase 6 CI work is done; what remains is the hosted side: open a PR so GitHub Actions
+  runs the new jobs, and validate a real deployment (`CORS_ORIGINS` for the Vercel origin,
+  `VITE_API_BASE_URL` against the deployed API) once hostnames exist.
 - Real Supabase Auth E2E is still pending the project's public anon key — see the Phase 5
   entry for exactly what is needed.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.

@@ -42,10 +42,18 @@ later from the Render dashboard. Required env vars when it is:
 
 ## CI/CD pipeline
 
-CI (`.github/workflows/ci.yml`) runs on push/PR for `main` and feature branches:
+CI (`.github/workflows/ci.yml`) runs on push to `main` and on pull requests, restricted to
+`backend/**`, `frontend/**`, `database/**`, and the workflow file itself.
 
-1. Backend: ruff lint → pytest (including tests that verify layering/imports).
-2. Frontend: `npm ci` → `tsc --noEmit` → `vite build`.
-3. Optionally, migrations are applied to a disposable PostgreSQL service container.
+Three independent jobs mirror the local quality gates:
+
+1. Backend: `pip install -r requirements.txt` → `ruff check .` → `ruff format --check .` → `pytest`
+   (including tests that verify layering/imports).
+2. Frontend: `npm ci` → `npm run lint` → `npm run typecheck` → `npm test` → `npm run build`.
+3. Database: migrations applied in order to a disposable PostgreSQL 17 service container →
+   `ruff check .` → `pytest` (schema/RLS/ownership tests on a fresh database).
+
+pip and npm dependency caches are keyed on the lock/requirements files. No job receives
+secrets; deployment credentials stay in the Render/Vercel secret stores.
 
 Deploy steps are triggered in the Vercel/Render consoles (git-connected), keeping CI lean.
