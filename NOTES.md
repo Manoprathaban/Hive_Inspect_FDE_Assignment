@@ -183,12 +183,46 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   (§19 item removed; validation-status banner and §18 now reflect the live-Postgres
   harness and migration runs).
 
+## 2026-09-29 — Production JWT authentication
+
+- Implemented real Supabase Auth JWT validation in `app/adapters/authentication/supabase.py`
+  (`SupabaseAuthProvider`), finally replacing the fails-closed stub. It verifies the access
+  token with HS256 against `SUPABASE_JWT_SECRET`, requires `exp` (enforced) and `sub` (a
+  UUID → `UserContext.user_id`), and — critically — requires **both** `aud` and `role` to
+  be `authenticated`. Supabase signs its `anon`/`service_role` API keys with the same JWT
+  secret, so without the role/aud check a leaked public key would mint a valid bearer
+  credential; the role check rejects those keys outright. `iss` is verified too when
+  `SUPABASE_URL` is configured (expected value `<url>/auth/v1`). Fails closed (raises) if
+  the secret is missing.
+- Protocol: `AuthenticationProvider.get_current_user(token: str)` — the API layer strips
+  the `Bearer` scheme and hands every provider the raw token. `DevAuthProvider` ignores the
+  value; `SupabaseAuthProvider` attests it. The auth dependency's §14 mapping is unchanged:
+  missing header → `401 AUTHENTICATION_REQUIRED`; any provider rejection →
+  `401 INVALID_TOKEN` (never distinguishable, identical `WWW-Authenticate: Bearer`).
+- Wiring: `app/api/dependencies/auth.py` now picks the provider by `Settings.app_env` —
+  `production` → `SupabaseAuthProvider` (built from `SUPABASE_JWT_SECRET`/`SUPABASE_URL`),
+  anything else → `DevAuthProvider`. Tests were untouched because the offline suite runs in
+  `development`; the production path is covered by a new dependency-override test file
+  (`tests/test_supabase_auth.py`).
+- Token-envelope detail kept: the header stays **required** in development too
+  (missing → 401), only its value is ignored — matching the existing API tests and the
+  §6 table, and contradicting an earlier "optional" phrase in §4.Development that is now
+  corrected in `docs/API-CONTRACTS.md`.
+- Tests: `tests/test_supabase_auth.py` mints HS256 tokens with a test secret (unit tests
+  for acceptance, bad signature, expired, wrong role/audience/issuer, malformed, non-UUID
+  `sub`, missing claims) plus API-wiring tests that inject the production provider and
+  assert `200` on a valid token and `401`/`401` on missing/invalid credentials. Provider
+  unit coverage 100%; `supabase.py` 29/29.
+- Docs: `DATABASE_DESIGN.md` §14 (protocol + adapter contract), §18 (API-key JWT confusion),
+  §19 (item removed); `API-CONTRACTS.md` §4 (verification rules) and §6 (header table);
+  `architecture.md` (auth boundary in "Established now"); `NOTES.md`; `backend/.env.example`
+  (`SUPABASE_JWT_SECRET`, `SUPABASE_URL`); PyJWT pinned in `requirements.txt`.
+
 ## Open questions
 
-- Next phase: wire real token validation into the production authentication provider
-  (the dev stub fails closed today; see `docs/BACKEND_DESIGN.md` /
-  `docs/API-CONTRACTS.md` §24), or begin frontend integration
-  (`docs/FRONTEND_DESIGN.md`).
+- Frontend integration is the next phase: `/login` via `@supabase/supabase-js`, attach the
+  session access token to the API client, and exercise the whole UI offline against the dev
+  stub (`docs/FRONTEND_DESIGN.md` §7/§17) or in production mode against Supabase Auth.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.
   a tool like Alembic/`supabase db push` — plain SQL chosen for now.
 - Deliberately out of scope until its phase: exposing template `delete` through the API

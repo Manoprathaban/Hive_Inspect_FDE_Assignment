@@ -19,7 +19,11 @@ DEV_USER_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 
 
 class DevAuthProvider:
-    """Always authenticates as the deterministic development user."""
+    """Always authenticates as the deterministic development user.
 
-    async def get_current_user(self) -> UserContext:
+    The received token is deliberately ignored (``Authorization`` is required by the API
+    layer but its value is meaningless offline — §4 Development).
+    """
+
+    async def get_current_user(self, token: str) -> UserContext:
         return UserContext(user_id=DEV_USER_ID, provider=AuthProviderKind.DEV)

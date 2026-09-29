@@ -32,6 +32,11 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/hive_inspect"
 
+    # Supabase Auth (production). SUPABASE_JWT_SECRET signs the access tokens the API
+    # validates; it is required whenever APP_ENV=production (the provider fails closed).
+    supabase_jwt_secret: str | None = None
+    supabase_url: str | None = None
+
     gemini_api_key: str | None = None
 
 

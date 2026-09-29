@@ -87,6 +87,13 @@ Application use case / repository (authorization scoping)
 - **Identity model:** the authenticated user's `user_id` maps 1:1 to
   `templates.owner_id`. `auth.users.id` == `public.users.id` in production (mirror
   trigger in migration `0001`).
+- **Token verification** (`SupabaseAuthProvider`, active when `APP_ENV=production`):
+  HS256 signature against the project's `SUPABASE_JWT_SECRET`; `exp` (required, enforced);
+  `aud` and `role` must both be `authenticated` — the `anon`/`service_role` API keys are
+  also valid HS256 JWTs signed with the same secret, so they are explicitly rejected, never
+  treated as a logged-in user; `sub` (the `auth.users` id) must be a UUID and becomes
+  `UserContext.user_id`. When `SUPABASE_URL` is configured the `iss` claim
+  (`<url>/auth/v1`) is verified too. The provider fails closed if the secret is missing.
 - **Missing token:** `401 AUTHENTICATION_REQUIRED`.
 - **Invalid token:** `401 INVALID_TOKEN`. **Expired token:** `401 INVALID_TOKEN` — the API
   does not distinguish invalid from expired responses (no extra information leak, and the
@@ -97,9 +104,10 @@ Application use case / repository (authorization scoping)
 
 When the backend runs in `APP_ENV=development`, the existing `DevAuthProvider` resolves
 every request to a single deterministic user
-(`00000000-0000-0000-0000-000000000001`, seeded by `database/seed/dev_auth.sql`). In
-development the `Authorization` header is optional and, if present, its value is ignored —
-the caller is always the dev user.
+(`00000000-0000-0000-0000-000000000001`, seeded by `database/seed/dev_auth.sql`). The
+`Authorization` header stays required (a missing header is `401 AUTHENTICATION_REQUIRED`,
+exactly as in production) but in development its value is ignored — the caller is always
+the dev user.
 
 > The development path must never be reachable in production. The production path must
 > never accept an identity supplied by the client.
@@ -131,7 +139,7 @@ the caller is always the dev user.
 
 | Header | Required | Value | Notes |
 | --- | --- | --- | --- |
-| `Authorization` | Yes (except `/health`, dev) | `Bearer <JWT>` | Production: Supabase Auth JWT. Development: optional/ignored (§4). |
+| `Authorization` | Yes (except `/health`) | `Bearer <JWT>` | Production: Supabase Auth JWT (verified, §4). Development: required but value ignored. |
 | `Content-Type` | For requests with a body | `application/json` | Except `POST /api/templates/import` which uses `multipart/form-data`. |
 | `Accept` | No | `application/json` | All responses are JSON. |
 
