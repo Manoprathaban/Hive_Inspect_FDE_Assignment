@@ -263,11 +263,52 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   `react/set-state-in-effect` for the Supabase session restore, which is a real external
   sync).
 
+## 2026-09-29 — Phase 5 integration (live stack)
+
+- Added `backend/tests/test_live_api_integration.py`: the acceptance flows of
+  `docs/FRONTEND_DESIGN.md` §28 driven over HTTP against a **running** server and real
+  PostgreSQL, the way the browser drives it. It is opt-in and skips itself without
+  `LIVE_API_BASE_URL`, so the offline run and CI are unaffected:
+  `LIVE_API_BASE_URL=http://127.0.0.1:8020 uv run pytest tests/test_live_api_integration.py`.
+- What it covers and why the existing suites could not: the serialized response shapes the
+  type guards in `frontend/src/lib/types.ts` accept; the real multipart import of
+  `sample-data/sheet1.xml` (13/69/392/520 plus 4 issues); all three PATCHes returning an
+  empty `204` and **persisting** across a refetch with `display_order` and comment options
+  intact; duplicate independence (fresh ids at every level, provenance, no copied issues,
+  and an edit on the copy leaving the original untouched); the error envelope for a
+  rejected upload (`415 INVALID_FILE`, nothing persisted); the import-issues endpoint
+  answering "what was skipped and why"; an indistinguishable `404`; and `401` without a
+  bearer token.
+- The canonical export is imported once per module (a cold import against the deployed
+  database is slow) and deleted again through PostgreSQL afterwards, because the API
+  contract has no delete route. Cleanup verifies the rows are gone and fails the suite
+  otherwise, so a repeatable run leaves the shared dev database untouched (confirmed: 0
+  templates before and after).
+- **Integration gap found and fixed:** the browser could not talk to a production build of
+  the frontend. `npm run preview` serves on port **4173**, which was not in the allowed
+  origins, so every API call from the built app would have failed CORS. `CORS_ORIGINS` now
+  defaults to `http://localhost:5173,http://localhost:4173,http://localhost:3000` in
+  `settings.py` and `.env.example`, and the live suite asserts preflight plus a real
+  cross-origin `GET` for each of those origins (including the `authorization` and
+  `content-type` request headers the app actually sends). `docs/deployment.md` now states
+  that a deployment must set the exact frontend origin.
+- **CHECK BLOCKED — real Supabase Auth end-to-end.** The frontend's production path
+  (signup → session JWT → API) cannot be exercised here: the project's **public anon key**
+  (`VITE_SUPABASE_ANON_KEY`) is not in this environment, and `backend/.env` only holds the
+  JWT secret and URL. It needs the anon key plus one Auth user, then
+  `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` in `frontend/.env.local` and the backend
+  running with `APP_ENV=production` (`SupabaseAuthProvider`). Everything up to the token
+  handoff is verified: the dev session, the `401` path, and the production provider's unit
+  and API-wiring tests from Phase 3.
+
 ## Open questions
 
-- Phase 5 integration is next: run the frontend and backend together, exercise the flow
-  with real Supabase Auth (signup → session token → API) instead of only the dev stub, and
-  add the CI frontend job that runs lint/typecheck/test/build on `frontend/` changes.
+- Phase 6 (CI/CD + deployment validation) is next: extend the existing CI frontend job to
+  run the same gates used locally (`npm run lint`, `npm run typecheck`, `npm test`,
+  `npm run build`), and validate the deployment wiring (`CORS_ORIGINS` for the Vercel
+  origin, `VITE_API_BASE_URL` against the deployed API).
+- Real Supabase Auth E2E is still pending the project's public anon key — see the Phase 5
+  entry for exactly what is needed.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.
   a tool like Alembic/`supabase db push` — plain SQL chosen for now.
 - Deliberately out of scope until its phase: exposing template `delete` through the API
