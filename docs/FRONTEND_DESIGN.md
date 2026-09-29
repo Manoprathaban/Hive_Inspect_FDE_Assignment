@@ -675,21 +675,27 @@ Basic, cost-effective accessibility (no elaborate framework; §23 of brief):
 
 ## 27. Testing Strategy
 
-**Currently implemented:** none (verified — `package.json` has no test runner). Not claimed
-below.
+**Currently implemented:** `vitest` + `@testing-library/react` (dev-only), jsdom, 9 test
+files / 67 tests, all passing (`npm test`). Covers:
 
-**Planned (added with `vitest` + `@testing-library/react`, dev-only):**
+- **Unit:** `lib/errors.ts` code→message mapping; validation rules for `name`/`content` and
+  the file gate; `lib/query.ts` key/invalidation/dedup semantics; contract type guards
+  (a 200 response with the wrong shape is rejected).
+- **Component:** `InlineTextEditor` (trimmed save, client-side rejection, draft preserved
+  with an inline error on failure, `Esc` cancel, empty content allowed),
+  `ImportIssuesPanel` (message/field/row, raw-value truncation, empty + loading states),
+  `ImportDialog` (wrong extension and oversize rejected before the API, upload progress →
+  non-cancellable importing, contract error surfaced inline, focus moved into the dialog),
+  `LoadingState` / `ErrorState` (variants, retry, back link).
+- **API integration:** `lib/apiClient` against a mocked `fetch` — method/path, bearer
+  header, exact request bodies (`{"name"}`, `{"content"}`, `null` for a nameless
+  duplicate), `204` handling, envelope → `ApiError`, 401 handler, transport failure.
+- **Login:** `loginMachine` reducer transitions.
 
-- **Unit:** `lib/errors.ts` code→message mapping; validation rules for `name`/`content`;
-  `lib/query.ts` key/invalidation logic; type guards.
-- **Component:** `InlineTextEditor` (save/cancel/loading/failure preserve-draft),
-  `ImportIssuesPanel`, `ImportDialog` error states, `LoadingState`/`ErrorState`.
-- **API integration:** `features/templates/api.ts` against mocked `fetch`
-  (request shape, auth header, `204` handling, error normalization).
-- **E2E (optional, if time allows):** the five acceptance flows (§28) via Playwright
-  against the real backend + seeded template.
-
-Nothing is claimed as shipped until the test files exist and pass.
+**Not implemented (deferred, see §32):** the Playwright E2E run of the five acceptance
+flows (§28). The flows were instead verified end-to-end against the real backend +
+deployed database (import → view → edit → duplicate → issues) and the modal accessibility
+behaviors have component coverage.
 
 ---
 
@@ -799,15 +805,19 @@ Public-only values, no secrets, `.env.example` maintained:
 ## 32. Implemented vs Planned
 
 ### CURRENTLY IMPLEMENTED
-- React 19 + TS + Vite bootstrap (single `App.tsx` placeholder page, `index.css` design
-  tokens, light/dark, `VITE_API_BASE_URL` on the page).
-- Build/typecheck/lint commands only. No routes, no API client, no auth, no components,
-  no tests.
+- Everything in §5–§26: router + routes (§6), `AuthProvider` with Supabase session and
+  the dev fallback (§7), the single HTTP boundary (§17), the server-state cache (§16),
+  template list/import/viewer/editor (§10–§12), the issue banner + panel (§13), the
+  duplication dialog (§15), the contract types (§22), and the tests (§27). `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build` all pass, and the flows were verified
+  against the real backend and deployed database.
+- Structure note: `lib/query.ts` is `lib/query.tsx` (it contains the provider JSX), and
+  `lib/useModalFocus.ts` was added for the dialog focus behavior required by §26.
 
 ### DESIGNED / NEXT IMPLEMENTATION
-- Everything in this document: router + routes (§6), auth provider (§7), API client (§17),
-  server-state cache (§16), template list/import/viewer/editor (§10–§12), issue panel
-  (§13), duplication (§15), types (§22), tests (§27).
+- Phase 5 integration: running the real Supabase Auth path (signup → session token → API)
+  instead of only the dev session, and a Playwright pass over the five acceptance flows
+  (§28) against the running stack.
 
 ### DEFERRED (explicitly not in v1)
 - Sanitized rich-HTML rendering of comment content (§24).
@@ -821,17 +831,17 @@ Public-only values, no secrets, `.env.example` maintained:
 
 | Assignment requirement | Frontend support | Status |
 | --- | --- | --- |
-| Import Spectora XLSX | `ImportDialog` → `POST /templates/import` (§12, §18) | Designed |
-| Preserve hierarchy | Viewer renders nested sections→items→comments (§9, §11) | Designed |
-| Preserve ordering | Arrays rendered in `display_order` as returned (§9, §16) | Designed |
-| Preserve comment/content text | `content` shown verbatim as text; markup preserved by backend (§14, §24) | Designed |
-| Unsupported/skipped content visible | Import issues banner + panel, never silent (§13) | Designed |
-| Edit section/item/comment | inline editors → PATCH (§14) | Designed |
-| Persistence across close/reopen | server-backed refetch, no localStorage (§14, §16) | Designed |
-| Duplicate template | `DuplicateTemplateDialog` → `POST duplicate` (§15) | Designed |
-| Independent copies | navigation to fresh response id; edits hit copy ids (§15, §22) | Designed |
-| Authentication | Supabase Auth session → bearer header (§7) | Designed |
-| Failure handling | single error mapping, recovery states, FLOW 4 (§20, §28) | Designed |
+| Import Spectora XLSX | `ImportDialog` → `POST /templates/import` (§12, §18) | Implemented |
+| Preserve hierarchy | Viewer renders nested sections→items→comments (§9, §11) | Implemented |
+| Preserve ordering | Arrays rendered in `display_order` as returned (§9, §16) | Implemented |
+| Preserve comment/content text | `content` shown verbatim as text; markup preserved by backend (§14, §24) | Implemented |
+| Unsupported/skipped content visible | Import issues banner + panel, never silent (§13) | Implemented |
+| Edit section/item/comment | inline editors → PATCH (§14) | Implemented |
+| Persistence across close/reopen | server-backed refetch, no localStorage (§14, §16) | Implemented |
+| Duplicate template | `DuplicateTemplateDialog` → `POST duplicate` (§15) | Implemented |
+| Independent copies | navigation to fresh response id; edits hit copy ids (§15, §22) | Implemented |
+| Authentication | Supabase Auth session → bearer header (§7) | Implemented; real Supabase sign-in not yet exercised (§32) |
+| Failure handling | single error mapping, recovery states, FLOW 4 (§20, §28) | Implemented |
 
 ---
 

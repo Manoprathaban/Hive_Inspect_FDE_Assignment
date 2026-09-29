@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { describeError } from '../../../lib/errors'
+import { useModalFocus } from '../../../lib/useModalFocus'
 import type { Template } from '../types'
 import { validateName } from '../api'
 import { useDuplicate } from '../hooks/useDuplicate'
@@ -21,6 +22,7 @@ export function DuplicateTemplateDialog({
   const { duplicate, isPending, error } = useDuplicate(template.id)
   const [name, setName] = useState(`${template.name} (Copy)`)
   const [nameError, setNameError] = useState<string | null>(null)
+  const dialogRef = useModalFocus<HTMLDivElement>()
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -56,6 +58,7 @@ export function DuplicateTemplateDialog({
         role="dialog"
         aria-modal="true"
         aria-label="Duplicate template"
+        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
       >
         <form onSubmit={handleSubmit}>

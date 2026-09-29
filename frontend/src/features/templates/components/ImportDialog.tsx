@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChangeEvent } from 'react'
 import { describeError } from '../../../lib/errors'
+import { useModalFocus } from '../../../lib/useModalFocus'
 import type { ImportIssue } from '../types'
 import { clientFileError } from '../api'
 import { useImport } from '../hooks/useImport'
@@ -15,6 +16,7 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
   const { runImport, phase, progress, error } = useImport()
   const [clientError, setClientError] = useState<string | null>(null)
   const fileRef = useRef<HTMLInputElement | null>(null)
+  const dialogRef = useModalFocus<HTMLDivElement>()
 
   const busy = phase === 'uploading' || phase === 'importing'
 
@@ -52,6 +54,7 @@ export function ImportDialog({ onClose, onImported }: ImportDialogProps) {
         role="dialog"
         aria-modal="true"
         aria-label="Import a template"
+        ref={dialogRef}
         onClick={(event) => event.stopPropagation()}
       >
         <div className="modal-heading">
