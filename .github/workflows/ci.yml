@@ -63,7 +63,7 @@ jobs:
         run: npm run build
 
   database:
-    name: Database (migrations on fresh PostgreSQL)
+    name: Database (migrations + schema tests on fresh PostgreSQL)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -90,3 +90,24 @@ jobs:
             echo "Applying $f"
             psql "postgresql://postgres@localhost:5432/hive_inspect_test" -v ON_ERROR_STOP=1 -f "$f"
           done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install database test dependencies
+        working-directory: database
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements-tests.txt
+
+      - name: Lint database tests
+        working-directory: database
+        run: ruff check .
+
+      - name: Test migrations and schema on fresh PostgreSQL
+        working-directory: database
+        env:
+          TEST_DATABASE_ADMIN_URL: postgresql://postgres:postgres@localhost:5432/postgres
+        run: pytest
