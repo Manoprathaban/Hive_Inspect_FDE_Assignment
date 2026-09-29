@@ -29,6 +29,8 @@ later from the Render dashboard. Required env vars when it is:
 - Supabase is the **managed PostgreSQL hosting layer**, not the application backend.
 - Apply migrations from `database/migrations/` via `psql` against the Supabase connection
   string (see `database/migrations/README.md`) or `supabase db push` if the CLI is used.
+- Full step-by-step (SQL Editor / psql / CLI, verification queries, live checks):
+  see `docs/supabase-deployment.md`.
 
 ## CI/CD pipeline
 
