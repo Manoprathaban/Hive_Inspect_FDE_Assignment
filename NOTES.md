@@ -218,11 +218,56 @@ Working notes / decision log for the Hive Inspect Template Importer assignment.
   `architecture.md` (auth boundary in "Established now"); `NOTES.md`; `backend/.env.example`
   (`SUPABASE_JWT_SECRET`, `SUPABASE_URL`); PyJWT pinned in `requirements.txt`.
 
+## 2026-09-29 — Frontend (Phase 4)
+
+- Implemented the app from `docs/FRONTEND_DESIGN.md` on `feature/frontend`: auth
+  (`/login`), template list, import, template view with inline editing, duplication, and
+  the import-issues panel. React 19 + TypeScript + Vite, React Router, and
+  `@supabase/supabase-js` for the browser session.
+- **Server state vs UI state (§11)**: a dependency-free query cache in
+  `src/lib/query.tsx` (`useQuery`/`useMutation`/`useCacheUpdater`/`useQueryStore`,
+  backed by `useSyncExternalStore`) holds all API data and is cleared wholesale on logout
+  so no data crosses users. Editing draft text, dialog visibility, and the import phase
+  machine are component state. No server data is mirrored into component state.
+- **No optimistic writes (§13)**: a PATCH resolves from the `204` and the confirmed value
+  is applied to the cache *and* refetched, so "Saved" is never claimed before the backend
+  confirmed. The inline editor keeps the user's draft plus the error on failure, and
+  disables double-submit while saving.
+- **Errors (§20)**: one HTTP boundary (`src/lib/apiClient.ts`) turns the contract
+  envelope into a typed `ApiError`; `describeError` maps each code to actionable copy,
+  and any `401` clears the session so the router guard returns to `/login`. Responses are
+  runtime-validated against the contract shapes, so a contract mismatch surfaces as an
+  error instead of rendering `undefined`.
+- **Auth (§7)**: `AuthProvider` restores a Supabase session, subscribes to auth changes,
+  and keeps the bearer token in sync. With no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY`
+  it falls back to a deterministic dev session, which the backend `DevAuthProvider`
+  accepts — so the whole flow runs offline. No secret ever enters a frontend env var.
+- **Import (§12)**: the dialog checks the file client-side (extension + 10 MiB, mirroring
+  the contract limits), uploads via `XMLHttpRequest` because `fetch` reports no upload
+  progress, and shows percentage → "Importing…" → navigation. Upload timeout is 600s on
+  purpose: a cold run of the committed export on the deployed database exceeds a minute
+  and the server keeps going, so a 60s client timeout would abandon a successful import.
+- Tests: 7 files / 56 tests (error normalization and contract guards, query cache
+  semantics, HTTP client request shapes and error mapping, import validation, the login
+  reducer, and the inline-editor/import-issues components). `npm run lint`,
+  `npm run typecheck`, `npm test`, `npm run build` all pass.
+- Live check against the deployed Supabase backend through the dev server: import of
+  `sample-data/sheet1.xml` (13 sections / 69 items / 392 comments / 520 options, 4 issues),
+  read-back, the three PATCHes with persistence re-read, import-issues, a duplicate with
+  independent ids carrying the edited values, the list endpoint, `401` without a bearer
+  token, and CORS preflight/`Access-Control-Allow-Origin` for the dev origin. Test data
+  was deleted afterwards.
+- Vitest runs on the `threads` pool: the default `forks` pool could not start workers in
+  this environment. Two files carry targeted `eslint-disable` comments with reasons
+  (`react/only-export-components` for provider + hooks modules, and
+  `react/set-state-in-effect` for the Supabase session restore, which is a real external
+  sync).
+
 ## Open questions
 
-- Frontend integration is the next phase: `/login` via `@supabase/supabase-js`, attach the
-  session access token to the API client, and exercise the whole UI offline against the dev
-  stub (`docs/FRONTEND_DESIGN.md` §7/§17) or in production mode against Supabase Auth.
+- Phase 5 integration is next: run the frontend and backend together, exercise the flow
+  with real Supabase Auth (signup → session token → API) instead of only the dev stub, and
+  add the CI frontend job that runs lint/typecheck/test/build on `frontend/` changes.
 - Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.
   a tool like Alembic/`supabase db push` — plain SQL chosen for now.
 - Deliberately out of scope until its phase: exposing template `delete` through the API

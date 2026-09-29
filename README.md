@@ -62,7 +62,8 @@ pytest
 
 ## Frontend
 
-Purely a Lovable-assisted React/TypeScript app. It talks to the backend over HTTP only.
+React + TypeScript SPA (Vite). It talks to the backend over HTTP only — no direct
+Supabase/PostgreSQL access from the browser.
 
 ```bash
 cd frontend
@@ -71,7 +72,22 @@ npm run dev
 ```
 
 Copy `frontend/.env.example` to `frontend/.env` and set `VITE_API_BASE_URL` to the
-backend URL (default `http://localhost:8000`). No secrets live in frontend env vars.
+backend URL (default `http://localhost:8000`, so the backend's default CORS origins —
+`http://localhost:5173` and `http://localhost:3000` — already allow the dev server).
+No secrets live in frontend env vars.
+
+With no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` set, the app uses the deterministic
+development session (any credentials; requests carry the dev token the backend's
+`DevAuthProvider` accepts). Set both to sign in against real Supabase Auth.
+
+Quality gates (same commands CI runs):
+
+```bash
+npm run lint
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Database
 
@@ -86,5 +102,7 @@ consistently on local PostgreSQL, Supabase, and CI. See `database/migrations/REA
 
 ## Phase
 
-Repository foundation only. Product features (importers, template schema, UI screens)
-are intentionally not implemented yet.
+Phases 1–4 are implemented: database schema/migrations, backend domain + application,
+the REST API from `docs/API-CONTRACTS.md`, and the React frontend from
+`docs/FRONTEND_DESIGN.md`. Phase 5 (integration) and later phases are tracked in
+`NOTES.md`.
