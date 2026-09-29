@@ -186,3 +186,40 @@ def test_health_route_stays_open(client: TestClient) -> None:
     # health sits outside the /api bearer dependency
     response = client.get("/health")
     assert response.status_code == 200
+
+
+def test_provider_accepts_es256_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    private_key = ec.generate_private_key(ec.SECP256R1())
+    public_key = private_key.public_key()
+
+    now = datetime.now(UTC)
+    payload = {
+        "iss": ISSUER,
+        "sub": str(USER_ID),
+        "aud": "authenticated",
+        "exp": int((now + timedelta(hours=1)).timestamp()),
+        "iat": int(now.timestamp()),
+        "role": "authenticated",
+        "email": EMAIL,
+    }
+    es256_token = jwt.encode(payload, private_key, algorithm="ES256")
+
+    class DummySigningKey:
+        def __init__(self, key: object) -> None:
+            self.key = key
+
+    class DummyJWKSClient:
+        def get_signing_key_from_jwt(self, token: str) -> DummySigningKey:
+            return DummySigningKey(public_key)
+
+    provider = SupabaseAuthProvider(jwt_secret=SECRET, supabase_url=SUPABASE_URL)
+    monkeypatch.setattr(provider, "_jwks_client", DummyJWKSClient())
+
+    async def _run() -> UserContext:
+        return await provider.get_current_user(token=es256_token)
+
+    context = asyncio.run(_run())
+    assert context.user_id == USER_ID
+    assert context.email == EMAIL

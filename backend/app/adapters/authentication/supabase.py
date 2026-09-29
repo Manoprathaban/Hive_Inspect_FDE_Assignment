@@ -69,12 +69,21 @@ class SupabaseAuthProvider:
             unverified_header = jwt.get_unverified_header(token)
             alg = unverified_header.get("alg", "HS256")
 
-            if alg == "RS256" and self._jwks_client:
-                signing_key = self._jwks_client.get_signing_key_from_jwt(token)
+            if alg != "HS256":
+                if self._jwks_client:
+                    jwks_client = self._jwks_client
+                else:
+                    unverified_payload = jwt.decode(token, options={"verify_signature": False})
+                    iss = unverified_payload.get("iss")
+                    if not iss or not isinstance(iss, str) or not iss.startswith("https://"):
+                        raise jwt.InvalidTokenError("Invalid token issuer for asymmetric algorithm")
+                    jwks_url = f"{iss.rstrip('/')}/.well-known/jwks.json"
+                    jwks_client = jwt.PyJWKClient(jwks_url)
+
+                signing_key = jwks_client.get_signing_key_from_jwt(token)
                 key = signing_key.key
             else:
                 key = self._jwt_secret
-                alg = "HS256"
 
             payload = jwt.decode(
                 token,
