@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  Well-formed XML that is NOT an OOXML worksheet: the root element is wrong.
+  The importer must reject this as "not a recognised Spectora template export"
+  (API: 422 INVALID_XLSX), not attempt to parse it as a template.
+-->
+<Workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+  <SheetData>
+    <Row>
+      <Cell><Data>Section Name</Data></Cell>
+      <Cell><Data>Item Name</Data></Cell>
+      <Cell><Data>Comment Name</Data></Cell>
+      <Cell><Data>Comment Type</Data></Cell>
+      <Cell><Data>Answer Type</Data></Cell>
+    </Row>
+  </SheetData>
+</Workbook>

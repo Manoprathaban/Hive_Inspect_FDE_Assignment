@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>
+<row r="1">
+<c r="A1" t="inlineStr"><is><t>Section Name</t></is></c>
+<c r="B1" t="inlineStr"><is><t>Item Name</t></is></c>
+<c r="C1" t="inlineStr"><is><t>Comment Name</t></is></c>
+<c r="D1" t="inlineStr"><is><t>Comment Text</t></is></c>
+<c r="E1" t="inlineStr"><is><t>Comment Type</t></is></c>
+<c r="F1" t="inlineStr"><is><t>Answer Type</t></is></c>
+<c r="G1" t="inlineStr"><is><t>Category</t></is></c>
+</row>
+<row r="2">
+<c r="A2" t="inlineStr"><is><t>Only Section</t></is></c>
+<c r="B2" t="inlineStr"><is><t>Only Item</t></is></c>
+<c r="C2" t="inlineStr"><is><t>Only Comment</t></is></c>
+<c r="D2" t="inlineStr"><is><t>Text kept exactly as written, including punctuation &amp; spacing.</t></is></c>
+<c r="E2" t="inlineStr"><is><t>info</t></is></c>
+<c r="F2" t="inlineStr"><is><t>text</t></is></c>
+<c r="G2" t="inlineStr"><is><t>0</t></is></c>
+</row>
+<row r="3">
+<c r="A3" t="inlineStr"><is><t>Only Section</t></is></c>
+<c r="B3" t="inlineStr"><is><t>Only Item</t></is></c>
+<c r="C3" t="inlineStr"><is><t>Blank text</t></is></c>
+<c r="E3" t="inlineStr"><is><t>info</t></is></c>
+<c r="F3" t="inlineStr"><is><t>text</t></is></c>
+<c r="G3" t="inlineStr"><is><t>0</t></is></c>
+</row>
+<row r="4">
+<c r="A4" t="inlineStr"><is><t>Only Section</t></is></c>
+<c r="B4" t="inlineStr"><is><t>Only Item</t></is></c>
+<c r="C4" t="inlineStr"><is><t>Unicode: café, naïve, 日本語, emoji 🔧</t></is></c>
+<c r="D4" t="inlineStr"><is><t>Ünïcödé must survive the round trip unchanged.</t></is></c>
+<c r="E4" t="inlineStr"><is><t>info</t></is></c>
+<c r="F4" t="inlineStr"><is><t>text</t></is></c>
+<c r="G4" t="inlineStr"><is><t>0</t></is></c>
+</row>
+<row r="5">
+<c r="A5" t="inlineStr"><is><t>Only Section</t></is></c>
+<c r="B5" t="inlineStr"><is><t>Only Item</t></is></c>
+<c r="C5" t="inlineStr"><is><t>HTML &amp; markup &lt;b&gt;bold&lt;/b&gt;</t></is></c>
+<c r="D5" t="inlineStr"><is><t>Angle brackets &lt; and &gt; and an ampersand &amp; are entity-escaped in the sheet.</t></is></c>
+<c r="E5" t="inlineStr"><is><t>info</t></is></c>
+<c r="F5" t="inlineStr"><is><t>text</t></is></c>
+<c r="G5" t="inlineStr"><is><t>0</t></is></c>
+</row>
+<row r="6">
+<c r="A6" t="inlineStr"><is><t>Only Section</t></is></c>
+<c r="B6" t="inlineStr"><is><t>Only Item</t></is></c>
+<c r="C6" t="inlineStr"><is><t>Whitespace in name is trimmed   </t></is></c>
+<c r="D6" t="inlineStr"><is><t>   </t></is></c>
+<c r="E6" t="inlineStr"><is><t>info</t></is></c>
+<c r="F6" t="inlineStr"><is><t>text</t></is></c>
+<c r="G6" t="inlineStr"><is><t>0</t></is></c>
+</row>
+</sheetData>
+</worksheet>
