@@ -1,0 +1,107 @@
+{
+  "name": "edge-cases",
+  "source": "spectora",
+  "source_filename": "edge-cases.xml",
+  "counts": {
+    "sections": 1,
+    "items": 1,
+    "comments": 5,
+    "options": 0,
+    "issues": 0
+  },
+  "sections": [
+    {
+      "name": "Only Section",
+      "display_order": 0,
+      "items": [
+        {
+          "name": "Only Item",
+          "display_order": 0,
+          "comments": [
+            {
+              "name": "Only Comment",
+              "content": "Text kept exactly as written, including punctuation & spacing.",
+              "comment_type": "info",
+              "answer_type": "text",
+              "display_order": 0,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 2,
+              "options": []
+            },
+            {
+              "name": "Blank text",
+              "content": "",
+              "comment_type": "info",
+              "answer_type": "text",
+              "display_order": 1,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 3,
+              "options": []
+            },
+            {
+              "name": "Unicode: café, naïve, 日本語, emoji 🔧",
+              "content": "Ünïcödé must survive the round trip unchanged.",
+              "comment_type": "info",
+              "answer_type": "text",
+              "display_order": 2,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 4,
+              "options": []
+            },
+            {
+              "name": "HTML & markup <b>bold</b>",
+              "content": "Angle brackets < and > and an ampersand & are entity-escaped in the sheet.",
+              "comment_type": "info",
+              "answer_type": "text",
+              "display_order": 3,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 5,
+              "options": []
+            },
+            {
+              "name": "Whitespace in name is trimmed",
+              "content": "   ",
+              "comment_type": "info",
+              "answer_type": "text",
+              "display_order": 4,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 6,
+              "options": []
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "issues": []
+}

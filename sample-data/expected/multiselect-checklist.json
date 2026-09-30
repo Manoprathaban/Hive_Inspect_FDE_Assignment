@@ -1,0 +1,283 @@
+{
+  "name": "multiselect-checklist",
+  "source": "spectora",
+  "source_filename": "multiselect-checklist.xml",
+  "counts": {
+    "sections": 4,
+    "items": 6,
+    "comments": 9,
+    "options": 12,
+    "issues": 0
+  },
+  "sections": [
+    {
+      "name": "Safety",
+      "display_order": 0,
+      "items": [
+        {
+          "name": "Smoke Alarms",
+          "display_order": 0,
+          "comments": [
+            {
+              "name": "Smoke alarm present",
+              "content": "Verify an alarm on each level and near sleeping areas.",
+              "comment_type": "info",
+              "answer_type": "boolean",
+              "display_order": 0,
+              "category": 0,
+              "recommendation": "Replace if inoperable",
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 2,
+              "options": []
+            },
+            {
+              "name": "Alarm sound tested",
+              "content": "Press the test button and listen for the pattern.",
+              "comment_type": "defect",
+              "answer_type": "checkbox",
+              "display_order": 1,
+              "category": 1,
+              "recommendation": "Replace unit",
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 3,
+              "options": [
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Chirping",
+                  "display_order": 0
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Silent",
+                  "display_order": 1
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Intermittent",
+                  "display_order": 2
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "Carbon Monoxide",
+          "display_order": 1,
+          "comments": [
+            {
+              "name": "CO alarm present",
+              "content": "",
+              "comment_type": "info",
+              "answer_type": "boolean",
+              "display_order": 2,
+              "category": -1,
+              "recommendation": null,
+              "default_value": "2",
+              "default_value_2": "Not tested",
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 4,
+              "options": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Electrical",
+      "display_order": 1,
+      "items": [
+        {
+          "name": "Panel",
+          "display_order": 0,
+          "comments": [
+            {
+              "name": "Panel amperage",
+              "content": "Record the rating from the main breaker.",
+              "comment_type": "info",
+              "answer_type": "number",
+              "display_order": 0,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": "Amps",
+              "estimate_min": "100",
+              "estimate_max": "200",
+              "source_row": 5,
+              "options": []
+            },
+            {
+              "name": "Service date",
+              "content": "",
+              "comment_type": "info",
+              "answer_type": "date",
+              "display_order": 1,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 6,
+              "options": []
+            }
+          ]
+        },
+        {
+          "name": "Outlets",
+          "display_order": 1,
+          "comments": [
+            {
+              "name": "GFCI present",
+              "content": "Test every device with a GFCI tester.",
+              "comment_type": "defect",
+              "answer_type": "checkbox",
+              "display_order": 2,
+              "category": 1,
+              "recommendation": "Correct the wiring",
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 7,
+              "options": [
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Yes",
+                  "display_order": 0
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "No",
+                  "display_order": 1
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Plumbing",
+      "display_order": 2,
+      "items": [
+        {
+          "name": "Water Heater",
+          "display_order": 0,
+          "comments": [
+            {
+              "name": "Insulation condition",
+              "content": "",
+              "comment_type": "limit",
+              "answer_type": "range",
+              "display_order": 0,
+              "category": 0,
+              "recommendation": "Insulate",
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": "5",
+              "estimate_max": "25",
+              "source_row": 8,
+              "options": [
+                {
+                  "option_type": "unit_type",
+                  "value": "Square Feet",
+                  "display_order": 0
+                },
+                {
+                  "option_type": "unit_type",
+                  "value": "Linear Feet",
+                  "display_order": 1
+                }
+              ]
+            },
+            {
+              "name": "Manufacturer",
+              "content": "",
+              "comment_type": "info",
+              "answer_type": "text",
+              "display_order": 1,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 9,
+              "options": []
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "Roofing",
+      "display_order": 3,
+      "items": [
+        {
+          "name": "Shingles",
+          "display_order": 0,
+          "comments": [
+            {
+              "name": "Covering material",
+              "content": "Identify the covering from the visible edge.",
+              "comment_type": "info",
+              "answer_type": "checkbox",
+              "display_order": 0,
+              "category": 0,
+              "recommendation": null,
+              "default_value": null,
+              "default_value_2": null,
+              "default_unit_type": null,
+              "estimate_min": null,
+              "estimate_max": null,
+              "source_row": 10,
+              "options": [
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Asphalt",
+                  "display_order": 0
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Composition",
+                  "display_order": 1
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Metal",
+                  "display_order": 2
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Tile",
+                  "display_order": 3
+                },
+                {
+                  "option_type": "multiple_choice",
+                  "value": "Wood Shake",
+                  "display_order": 4
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "issues": []
+}
