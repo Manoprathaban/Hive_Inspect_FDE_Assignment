@@ -4,14 +4,18 @@ Authoritative design for the PostgreSQL schema and the domain/protocol boundary.
 the assignment's *schema/database foundation* step only.
 
 - Migrations: `database/migrations/0001_create_template_schema.sql`,
-  `database/migrations/0002_rls_policies.sql`
+  `database/migrations/0002_rls_policies.sql`,
+  `database/migrations/0003_rls_enforcement.sql`
 - Seed: `database/seed/dev_auth.sql`
 - Domain/protocol code: `backend/app/domain/`, `backend/app/protocols/`
 
 > **Validation status:** migrations and RLS were validated statically (PostgreSQL grammar
 > parse via `pglast`) and then executed against a live local PostgreSQL instance: schema,
 > FKs, cascades, triggers, seeds, and RLS cross-user checks are exercised by the harness in
-> `database/tests` (`make db-test`), which runs in CI; see §17.
+> `database/tests` (`make db-test`), which runs in CI; see §17. `0003` was additionally
+> applied to the live Supabase project and verified there: the owning user still reads its
+> own rows, an unrelated user reads zero rows across all five user-owned tables, and a
+> cross-tenant `INSERT` is rejected by `WITH CHECK`.
 
 ---
 
@@ -222,15 +226,23 @@ provenance only and never dereferenced for data access.
   row seeded by `database/seed/dev_auth.sql` — the stub maps to the same identity the
   database can reference, without inventing a parallel user system.
 - **Enforcement (two layers).**
-  1. **Application/backend (primary).** The backend connects with a privileged role and
-     scopes every query by `owner_id = current UserContext.user_id`. The repository
-     protocol (`TemplateRepository`) *receives* `owner_id` on every operation so no path
-     can omit it.
+  1. **Application/backend (primary).** The backend scopes every query by
+     `owner_id = current UserContext.user_id`. The repository protocol
+     (`TemplateRepository`) *receives* `owner_id` on every operation so no path can omit it.
   2. **RLS (defense in depth).** On Supabase, `auth.uid()`-keyed policies (§6) bind every
-     statement a user can issue, so even direct access is scoped. RLS is **never disabled**
-     for the development stub — locally the stub's repository calls still go through the
-     same app-layer `owner_id` scoping, and RLS simply does not apply to the privileged
-     backend connection.
+     statement, so even direct access is scoped. RLS is **never disabled** for the
+     development stub: the stub's repository calls go through the same app-layer `owner_id`
+     scoping, and they additionally run under the RLS-enforcing role described below.
+- **How RLS is made to bind (`0003`).** A table owner is exempt from its own row-level
+  security, so policies cannot attach to a connection that owns the tables. The request path
+  therefore does not run as the owner: each request opens a transaction, assumes the
+  non-owner `hive_app` role (`SET LOCAL ROLE`) and publishes the verified user's claims
+  (`set_config('request.jwt.claims', …, true)`), which is what `auth.uid()` reads. Both are
+  transaction-scoped, so a pooled connection cannot carry one user's identity into the next
+  request. The role is `NOLOGIN` (assumed only via `SET ROLE`, no password, no direct
+  connection) and `NOBYPASSRLS`. Only migrations and administrative work use the owner role.
+  Set `DB_APP_ROLE=` (empty) to disable this, which is only correct on plain PostgreSQL where
+  `0002` is a no-op anyway.
 - **No custom auth.** No password tables, no token storage; Supabase Auth owns
   authentication, our schema only records the resulting identity.
 
@@ -258,10 +270,12 @@ Applied in `0002_rls_policies.sql`, guarded so it only activates on Supabase (wh
 - **UPDATE safety.** `USING` gates which rows can be updated; `WITH CHECK` prevents
   re-pointing a row's `*_id` to a template/section/item the user does not own.
 - **DELETE safety.** `USING` restricts deletes to rows owned transitively by the actor.
-- **Service role / backend.** `supabase_service_role` (and the backend's privileged local
-  role) bypass RLS by design and are the *primary* enforcement path — which is precisely why
-  the repository contract threads `owner_id` explicitly. RLS is a second wall against
-  misconfigured or direct user-facing clients; it is never the only wall.
+- **Privileged roles.** The table owner and `supabase_service_role` bypass RLS, and are used
+  only for migrations and administration. They are **not** the request path: the backend's
+  repository transactions assume `hive_app` (§5), so a query that forgot its `owner_id`
+  predicate would return nothing rather than another user's rows. This is why the repository
+  contract threads `owner_id` explicitly — the predicates stay the readable, testable
+  expression of the rule, and RLS is the wall behind them.
 
 ---
 
