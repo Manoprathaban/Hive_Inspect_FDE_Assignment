@@ -60,6 +60,15 @@
   border: 1px solid var(--warning);
 }
 
+/* App-level chrome (e.g. log out). Right-aligned above the page content. */
+.app-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 20px 0;
+}
+
 /* Buttons */
 .button {
   display: inline-flex;
