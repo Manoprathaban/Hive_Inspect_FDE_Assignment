@@ -35,10 +35,11 @@ connects to Postgres until the first repository call.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.domain.exceptions import (
@@ -565,6 +566,13 @@ async def _load_template(
 
     Batched, ordered reads (§20 pattern 3). Child columns referenced by the ordering must
     be selected, so the child queries select slightly more than the aggregated shape.
+
+    The five child reads are mutually independent: each resolves its ancestors with a
+    subquery instead of an id list handed down from Python, so they are issued concurrently
+    on pooled connections rather than as five sequential round-trips. Rows, ORDER BY, and
+    the assembly below are unchanged, so the aggregate is identical to the sequential
+    version while paying one round-trip's latency instead of five. This needs spare
+    connections in the pool, which is why the engine is built with a widened pool.
     """
 
     template_row = (
@@ -579,86 +587,80 @@ async def _load_template(
     if template_row is None:
         return None
 
-    section_rows = (
-        await conn.execute(
-            text(
-                "SELECT " + _SECTION_COLUMNS + " "
-                "FROM public.sections WHERE template_id = :template_id "
-                "ORDER BY display_order"
-            ),
-            {"template_id": template_id},
-        )
-    ).all()
+    engine = conn.engine
 
-    section_ids = [row.id for row in section_rows]
-    item_rows = []
-    if section_ids:
-        item_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _ITEM_COLUMNS + " "
-                    "FROM public.items WHERE section_id IN :section_ids "
-                    "ORDER BY section_id, display_order"
-                ).bindparams(bindparam("section_ids", expanding=True)),
-                {"section_ids": section_ids},
-            )
-        ).all()
+    async def fetch(sql: str, params: dict[str, Any]) -> list[Any]:
+        async with engine.connect() as child_conn:
+            return (await child_conn.execute(text(sql), params)).all()
 
-    item_ids = [row.id for row in item_rows]
-    comment_rows = []
-    if item_ids:
-        comment_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _COMMENT_COLUMNS + " "
-                    "FROM public.comments WHERE item_id IN :item_ids "
-                    "ORDER BY item_id, display_order, id"
-                ).bindparams(bindparam("item_ids", expanding=True)),
-                {"item_ids": item_ids},
-            )
-        ).all()
-
-    comment_ids = [row.id for row in comment_rows]
-    option_rows = []
-    if comment_ids:
-        option_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _OPTION_COLUMNS + " "
-                    "FROM public.comment_options WHERE comment_id IN :comment_ids "
-                    "ORDER BY comment_id, display_order"
-                ).bindparams(bindparam("comment_ids", expanding=True)),
-                {"comment_ids": comment_ids},
-            )
-        ).all()
-
-    issues: list[ImportIssue] = []
+    child_params: dict[str, Any] = {"template_id": template_id}
+    pending = [
+        fetch(
+            "SELECT " + _SECTION_COLUMNS + " "
+            "FROM public.sections WHERE template_id = :template_id "
+            "ORDER BY display_order",
+            child_params,
+        ),
+        fetch(
+            "SELECT " + _ITEM_COLUMNS + " "
+            "FROM public.items WHERE section_id IN "
+            "(SELECT id FROM public.sections WHERE template_id = :template_id) "
+            "ORDER BY section_id, display_order",
+            child_params,
+        ),
+        fetch(
+            "SELECT " + _COMMENT_COLUMNS + " "
+            "FROM public.comments WHERE item_id IN "
+            "(SELECT i.id FROM public.items i "
+            "JOIN public.sections s ON s.id = i.section_id "
+            "WHERE s.template_id = :template_id) "
+            "ORDER BY item_id, display_order, id",
+            child_params,
+        ),
+        fetch(
+            "SELECT " + _OPTION_COLUMNS + " "
+            "FROM public.comment_options WHERE comment_id IN "
+            "(SELECT c.id FROM public.comments c "
+            "JOIN public.items i ON i.id = c.item_id "
+            "JOIN public.sections s ON s.id = i.section_id "
+            "WHERE s.template_id = :template_id) "
+            "ORDER BY comment_id, display_order",
+            child_params,
+        ),
+    ]
     if include_issues:
-        issue_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _ISSUE_COLUMNS + " "
-                    "FROM public.import_issues "
-                    "WHERE template_id = :template_id "
-                    "AND EXISTS (SELECT 1 FROM public.templates t "
-                    "WHERE t.id = import_issues.template_id AND t.owner_id = :owner_id) "
-                    "ORDER BY created_at DESC, id DESC"
-                ),
+        pending.append(
+            fetch(
+                "SELECT " + _ISSUE_COLUMNS + " "
+                "FROM public.import_issues "
+                "WHERE template_id = :template_id "
+                "AND EXISTS (SELECT 1 FROM public.templates t "
+                "WHERE t.id = import_issues.template_id AND t.owner_id = :owner_id) "
+                "ORDER BY created_at DESC, id DESC",
                 {"template_id": template_id, "owner_id": owner_id},
             )
-        ).all()
-        issues = [
-            ImportIssue(
-                id=row.id,
-                source_row=row.source_row,
-                source_field=row.source_field,
-                issue_type=IssueType(row.issue_type),
-                message=row.message,
-                raw_value=row.raw_value,
-                severity=IssueSeverity(row.severity),
-            )
-            for row in issue_rows
-        ]
+        )
+
+    fetched = await asyncio.gather(*pending)
+    section_rows, item_rows, comment_rows, option_rows = fetched[:4]
+    issue_rows = fetched[4] if include_issues else []
+
+    issues: list[ImportIssue] = [
+        ImportIssue(
+            id=row.id,
+            source_row=row.source_row,
+            source_field=row.source_field,
+            issue_type=IssueType(row.issue_type),
+            message=row.message,
+            raw_value=row.raw_value,
+            severity=IssueSeverity(row.severity),
+        )
+        for row in issue_rows
+    ]
+
+    section_ids = [row.id for row in section_rows]
+    item_ids = [row.id for row in item_rows]
+    comment_ids = [row.id for row in comment_rows]
 
     options_by_comment: dict[uuid.UUID, list[CommentOption]] = {
         comment_id: [] for comment_id in comment_ids

@@ -21,9 +21,21 @@ def create_async_engine_from_url(database_url: str) -> AsyncEngine:
     """Build an async SQLAlchemy engine bound to ``database_url``.
 
     No connection is opened here; SQLAlchemy connects lazily on first use.
+
+    The pool is deliberately wider than SQLAlchemy's default of 5. Reading one template
+    issues its child-table queries concurrently (see
+    ``app/adapters/repositories/postgres.py::_load_template``), so a single request can hold
+    several connections at once; on the default pool that turned into connection churn
+    against a remote pooler, where every new connection pays a TLS handshake. ``pool_timeout``
+    is raised so a burst degrades into waiting for a pooled connection rather than erroring.
     """
 
-    return create_async_engine(database_url)
+    return create_async_engine(
+        database_url,
+        pool_size=10,
+        max_overflow=10,
+        pool_timeout=30,
+    )
 
 
 @lru_cache
