@@ -204,11 +204,13 @@ used, so no direct PostgreSQL access exists on the frontend).
 - **Expired/invalid session:** any `401` from the API signs out and routes to `/login`
   (a session can be stale even if supabase-js thinks it is fine); users never see a raw
   401.
-- **Development:** the backend in `APP_ENV=development` ignores the bearer header
-  (`DevAuthProvider`, `API-CONTRACTS` §4). The frontend still runs the same auth flow, but
-  with `VITE_SUPABASE_URL` unset it falls back to a **dev session** (deterministic
-  placeholder token), so the whole UI is exercisable offline exactly as in production. A
-  visible "development" badge distinguishes this mode.
+- **Development:** the backend in `APP_ENV=development` maps the presented credential to an
+  identity (`DevAuthProvider`, `API-CONTRACTS` §4). The frontend still runs the same auth
+  flow, but with `VITE_SUPABASE_URL` unset it sends the entered email as a `dev:<email>`
+  credential instead of calling Supabase — never the password. Each email is therefore its
+  own workspace, so a second sign-in starts empty rather than inheriting the seeded demo
+  user's templates; a "Continue as demo user" shortcut fills in `demo@hive.test`. A visible
+  "development" badge distinguishes this mode.
 
 ---
 

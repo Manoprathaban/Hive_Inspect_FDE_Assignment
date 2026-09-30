@@ -12,14 +12,16 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 import jwt
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 
 from app.adapters.authentication.supabase import SupabaseAuthProvider
 from app.adapters.repositories.in_memory import InMemoryTemplateRepository
-from app.api.dependencies.auth import get_auth_provider
+from app.api.dependencies.auth import get_auth_provider, provision_identity, resolve_current_user
 from app.api.dependencies.providers import get_template_repository
 from app.domain.models.user import AuthProviderKind, UserContext
 from app.main import create_app
@@ -146,11 +148,20 @@ def test_provider_rejects_invalid_credentials(reason: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _skip_provisioning(
+    user: Annotated[UserContext, Depends(resolve_current_user)],
+) -> UserContext:
+    """The repository is stubbed here, so identity provisioning has nothing to write to."""
+
+    return user
+
+
 @pytest.fixture()
 def client() -> TestClient:
     app = create_app()
     repository = InMemoryTemplateRepository()
     app.dependency_overrides[get_template_repository] = lambda: repository
+    app.dependency_overrides[provision_identity] = _skip_provisioning
     app.dependency_overrides[get_auth_provider] = lambda: SupabaseAuthProvider(
         jwt_secret=SECRET, supabase_url=SUPABASE_URL
     )

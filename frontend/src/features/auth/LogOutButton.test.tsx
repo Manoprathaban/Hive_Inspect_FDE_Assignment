@@ -21,7 +21,7 @@ const mockUseSession = vi.mocked(useSession)
 
 function session(overrides: Partial<ReturnType<typeof useSession>> = {}) {
   return {
-    session: { accessToken: 'dev-token' },
+    session: { accessToken: 'dev:demo@hive.test' },
     isInitializing: false,
     isDevMode: true,
     login: vi.fn(),

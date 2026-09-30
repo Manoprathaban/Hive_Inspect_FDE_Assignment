@@ -29,6 +29,7 @@ from app.infrastructure.config.settings import get_settings
 __all__ = [
     "apply_rls_context",
     "create_async_engine_from_url",
+    "ensure_user_row",
     "get_async_engine",
     "owner_scoped_connection",
 ]
@@ -85,6 +86,25 @@ async def owner_scoped_connection(
         async with conn.begin():
             await apply_rls_context(conn, owner_id=owner_id, app_role=app_role)
             yield conn
+
+
+async def ensure_user_row(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
+    """Create the ``public.users`` row for ``user_id`` if it does not exist yet.
+
+    In production the ``on_auth_user_created`` trigger (0001) mirrors ``auth.users`` into
+    ``public.users``. A development identity is synthesised from a credential, so nothing
+    mirrors it, and without this row every write would fail the
+    ``templates.owner_id -> users.id`` foreign key.
+
+    Deliberately runs as the table owner, not the scoped role: provisioning an identity is
+    not a user-data operation and must not itself be filtered by the per-user policies.
+    """
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO public.users (id) VALUES (:user_id) ON CONFLICT (id) DO NOTHING"),
+            {"user_id": user_id},
+        )
 
 
 def create_async_engine_from_url(database_url: str) -> AsyncEngine:
