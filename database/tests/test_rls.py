@@ -89,7 +89,7 @@ async def insert_template(conn: asyncpg.Connection, owner_id: str) -> str:
     )
     return str(
         await conn.fetchval(
-            "INSERT INTO templates (owner_id, name, source) " "VALUES ($1, $2, $3) RETURNING id",
+            "INSERT INTO templates (owner_id, name, source) VALUES ($1, $2, $3) RETURNING id",
             uid(owner_id),
             "Private",
             "spectora",
@@ -153,7 +153,7 @@ async def test_user_cannot_insert_under_another_users_template(
     async with identity(conn, role_b, USER_B_ID):
         with pytest.raises(PostgresError, match=RLS_ERROR):
             await conn.execute(
-                "INSERT INTO sections (template_id, name, display_order) " "VALUES ($1, $2, $3)",
+                "INSERT INTO sections (template_id, name, display_order) VALUES ($1, $2, $3)",
                 uid(template_id),
                 "Sneaky",
                 0,
@@ -272,9 +272,66 @@ async def test_issue_cannot_be_recorded_under_foreign_template(
     async with identity(conn, role_b, USER_B_ID):
         with pytest.raises(PostgresError, match=RLS_ERROR):
             await conn.execute(
-                "INSERT INTO import_issues (template_id, issue_type, message) "
-                "VALUES ($1, $2, $3)",
+                "INSERT INTO import_issues (template_id, issue_type, message) VALUES ($1, $2, $3)",
                 uid(template_id),
                 "SOURCE_DATA_MISSING",
                 "nope",
+            )
+
+
+APP_ROLE = "hive_app"
+
+
+async def test_app_role_created_by_0003(supabase_database) -> None:
+    """0003 must leave behind a role the request path can actually assume."""
+
+    conn, _role_a, _role_b = supabase_database
+    role = await conn.fetchrow(
+        "SELECT rolsuper, rolbypassrls, rolcanlogin FROM pg_roles WHERE rolname = $1",
+        APP_ROLE,
+    )
+    assert role is not None, "0003 must create the hive_app role"
+    # NOSUPERUSER + NOBYPASSRLS: without these the policies would be bypassed again.
+    assert role["rolsuper"] is False
+    assert role["rolbypassrls"] is False
+    # NOLOGIN: assumed via SET ROLE only, so it holds no password and cannot be connected
+    # to directly as a way around the policies.
+    assert role["rolcanlogin"] is False
+    assert await conn.fetchval("SELECT pg_has_role(current_user, $1, 'MEMBER')", APP_ROLE) is True
+    for table in ALL_TABLES:
+        granted = await conn.fetchval(
+            "SELECT has_table_privilege($1, $2, 'SELECT')", APP_ROLE, f"public.{table}"
+        )
+        assert granted is True, f"hive_app cannot read public.{table}"
+
+
+async def test_policies_bind_on_the_app_role_request_path(supabase_database) -> None:
+    """The real request path: the app role is a non-owner, so 0002's policies apply."""
+
+    conn, _role_a, _role_b = supabase_database
+    mine = await insert_template(conn, USER_A_ID)
+    theirs = await insert_template(conn, USER_B_ID)
+
+    async with identity(conn, APP_ROLE, USER_A_ID) as scoped:
+        assert await scoped.fetchval("SELECT count(*) FROM templates") == 1
+        assert await scoped.fetchval("SELECT count(*) FROM templates WHERE id = $1", uid(mine)) == 1
+
+    async with identity(conn, APP_ROLE, USER_B_ID) as scoped:
+        assert await scoped.fetchval("SELECT count(*) FROM templates") == 1
+        assert (
+            await scoped.fetchval("SELECT count(*) FROM templates WHERE id = $1", uid(theirs)) == 1
+        )
+
+    # A user with no templates of their own must not see the other user's row, even
+    # though the statement carries no owner predicate at all.
+    stranger = "33333333-3333-3333-3333-333333333333"
+    await conn.execute("INSERT INTO users (id) VALUES ($1)", uid(stranger))
+    async with identity(conn, APP_ROLE, stranger) as scoped:
+        assert await scoped.fetchval("SELECT count(*) FROM templates") == 0
+        assert await scoped.fetchval("SELECT count(*) FROM sections") == 0
+        assert await scoped.fetchval("SELECT count(*) FROM comments") == 0
+        with pytest.raises(PostgresError, match=RLS_ERROR):
+            await scoped.execute(
+                "INSERT INTO templates (owner_id, name, source) VALUES ($1, 'Forged', 'spectora')",
+                uid(USER_A_ID),
             )

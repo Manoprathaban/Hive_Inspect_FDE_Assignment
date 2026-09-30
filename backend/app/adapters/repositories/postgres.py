@@ -35,10 +35,11 @@ connects to Postgres until the first repository call.
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from typing import Any
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.domain.exceptions import (
@@ -61,6 +62,7 @@ from app.domain.models.template import (
     Template,
     TemplateSummary,
 )
+from app.infrastructure.database import owner_scoped_connection
 
 __all__ = ["PostgresTemplateRepository"]
 
@@ -78,11 +80,32 @@ _OPTION_COLUMNS = "id, comment_id, option_type, value, display_order"
 _ISSUE_COLUMNS = "id, source_row, source_field, issue_type, message, raw_value, severity"
 
 
+def _owner_connection(engine: AsyncEngine, *, owner_id: uuid.UUID, app_role: str | None) -> Any:
+    """Return a context manager yielding a transaction scoped to ``owner_id``.
+
+    With ``app_role`` set, the transaction assumes the non-owner role and publishes the
+    acting user's claims, so the 0002 RLS policies filter every statement in addition to the
+    ``owner_id`` predicates below. With ``app_role=None`` it is an ordinary transaction:
+    that is the path taken against plain PostgreSQL, where 0002 is a no-op because no
+    ``auth`` schema exists, and the predicates are the only enforcement point available.
+    """
+
+    if app_role is None:
+        return engine.begin()
+    return owner_scoped_connection(engine, owner_id=owner_id, app_role=app_role)
+
+
 class PostgresTemplateRepository:
     """Owner-scoped template persistence backed by PostgreSQL."""
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(self, engine: AsyncEngine, *, app_role: str | None = None) -> None:
         self._engine = engine
+        self._app_role = app_role
+
+    def _owner_connection(self, owner_id: uuid.UUID) -> Any:
+        """Return a context manager yielding an owner-scoped connection."""
+
+        return _owner_connection(self._engine, owner_id=owner_id, app_role=self._app_role)
 
     # ------------------------------------------------------------------
     # Writes
@@ -91,7 +114,7 @@ class PostgresTemplateRepository:
     async def save(self, template: Template, *, owner_id: uuid.UUID) -> Template:
         """Persist a new aggregate (with sections/items/comments/options/issues)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             template_id, created_at, updated_at = await _insert_template(
                 conn,
                 owner_id=owner_id,
@@ -128,12 +151,13 @@ class PostgresTemplateRepository:
     ) -> Template:
         """Create an independent deep copy (provenance, new ids, no issues)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             source = await _load_template(
                 conn,
                 template_id=template_id,
                 owner_id=owner_id,
                 include_issues=False,
+                app_role=self._app_role,
             )
             if source is None:
                 raise TemplateNotFoundError(template_id)
@@ -172,7 +196,7 @@ class PostgresTemplateRepository:
     ) -> None:
         """Rename an owned section (single-row, template timestamps untouched)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             await _check_template_owned(conn, template_id=template_id, owner_id=owner_id)
             result = await conn.execute(
                 text(
@@ -196,7 +220,7 @@ class PostgresTemplateRepository:
     ) -> None:
         """Rename an owned item (single-row, template timestamps untouched)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             await _check_template_owned(conn, template_id=template_id, owner_id=owner_id)
             result = await conn.execute(
                 text(
@@ -221,7 +245,7 @@ class PostgresTemplateRepository:
     ) -> None:
         """Replace an owned comment's content (single-row edit, verbatim)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             await _check_template_owned(conn, template_id=template_id, owner_id=owner_id)
             result = await conn.execute(
                 text(
@@ -240,7 +264,7 @@ class PostgresTemplateRepository:
     async def delete(self, template_id: uuid.UUID, *, owner_id: uuid.UUID) -> bool:
         """Delete an owned template and its descendants; ``False`` when not owned."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             result = await conn.execute(
                 text(
                     "DELETE FROM public.templates WHERE id = :template_id AND owner_id = :owner_id"
@@ -256,18 +280,19 @@ class PostgresTemplateRepository:
     async def get(self, template_id: uuid.UUID, *, owner_id: uuid.UUID) -> Template | None:
         """Full hierarchy of an owned template; ``None`` when missing/foreign."""
 
-        async with self._engine.connect() as conn:
+        async with self._owner_connection(owner_id) as conn:
             return await _load_template(
                 conn,
                 template_id=template_id,
                 owner_id=owner_id,
                 include_issues=True,
+                app_role=self._app_role,
             )
 
     async def list_for_user(self, owner_id: uuid.UUID) -> list[TemplateSummary]:
         """Summaries of the acting user's templates, most recently updated first."""
 
-        async with self._engine.connect() as conn:
+        async with self._owner_connection(owner_id) as conn:
             rows = (
                 await conn.execute(
                     text(
@@ -295,7 +320,7 @@ class PostgresTemplateRepository:
     ) -> list[ImportIssue]:
         """An owned template's import issues, newest first; ``[]`` when missing/foreign."""
 
-        async with self._engine.connect() as conn:
+        async with self._owner_connection(owner_id) as conn:
             rows = (
                 await conn.execute(
                     text(
@@ -560,11 +585,22 @@ async def _load_template(
     template_id: uuid.UUID,
     owner_id: uuid.UUID,
     include_issues: bool,
+    app_role: str | None = None,
 ) -> Template | None:
     """Assemble an owned template's full hierarchy (and issues when requested).
 
     Batched, ordered reads (§20 pattern 3). Child columns referenced by the ordering must
     be selected, so the child queries select slightly more than the aggregated shape.
+
+    The five child reads are mutually independent: each resolves its ancestors with a
+    subquery instead of an id list handed down from Python, so they are issued concurrently
+    on pooled connections rather than as five sequential round-trips. Rows, ORDER BY, and
+    the assembly below are unchanged, so the aggregate is identical to the sequential
+    version while paying one round-trip's latency instead of five. This needs spare
+    connections in the pool, which is why the engine is built with a widened pool.
+
+    ``app_role`` is forwarded so the child reads run under the same RLS identity as the
+    parent read; see :func:`_owner_connection`.
     """
 
     template_row = (
@@ -579,86 +615,83 @@ async def _load_template(
     if template_row is None:
         return None
 
-    section_rows = (
-        await conn.execute(
-            text(
-                "SELECT " + _SECTION_COLUMNS + " "
-                "FROM public.sections WHERE template_id = :template_id "
-                "ORDER BY display_order"
-            ),
-            {"template_id": template_id},
-        )
-    ).all()
+    engine = conn.engine
 
-    section_ids = [row.id for row in section_rows]
-    item_rows = []
-    if section_ids:
-        item_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _ITEM_COLUMNS + " "
-                    "FROM public.items WHERE section_id IN :section_ids "
-                    "ORDER BY section_id, display_order"
-                ).bindparams(bindparam("section_ids", expanding=True)),
-                {"section_ids": section_ids},
-            )
-        ).all()
+    # Each child read runs on its own pooled connection, so each one is scoped to the same
+    # acting user independently — without this the concurrent reads would run unscoped and
+    # RLS would filter them by a different (or missing) identity than the parent read.
+    async def fetch(sql: str, params: dict[str, Any]) -> list[Any]:
+        async with _owner_connection(engine, owner_id=owner_id, app_role=app_role) as child_conn:
+            return (await child_conn.execute(text(sql), params)).all()
 
-    item_ids = [row.id for row in item_rows]
-    comment_rows = []
-    if item_ids:
-        comment_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _COMMENT_COLUMNS + " "
-                    "FROM public.comments WHERE item_id IN :item_ids "
-                    "ORDER BY item_id, display_order, id"
-                ).bindparams(bindparam("item_ids", expanding=True)),
-                {"item_ids": item_ids},
-            )
-        ).all()
-
-    comment_ids = [row.id for row in comment_rows]
-    option_rows = []
-    if comment_ids:
-        option_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _OPTION_COLUMNS + " "
-                    "FROM public.comment_options WHERE comment_id IN :comment_ids "
-                    "ORDER BY comment_id, display_order"
-                ).bindparams(bindparam("comment_ids", expanding=True)),
-                {"comment_ids": comment_ids},
-            )
-        ).all()
-
-    issues: list[ImportIssue] = []
+    child_params: dict[str, Any] = {"template_id": template_id}
+    pending = [
+        fetch(
+            "SELECT " + _SECTION_COLUMNS + " "
+            "FROM public.sections WHERE template_id = :template_id "
+            "ORDER BY display_order",
+            child_params,
+        ),
+        fetch(
+            "SELECT " + _ITEM_COLUMNS + " "
+            "FROM public.items WHERE section_id IN "
+            "(SELECT id FROM public.sections WHERE template_id = :template_id) "
+            "ORDER BY section_id, display_order",
+            child_params,
+        ),
+        fetch(
+            "SELECT " + _COMMENT_COLUMNS + " "
+            "FROM public.comments WHERE item_id IN "
+            "(SELECT i.id FROM public.items i "
+            "JOIN public.sections s ON s.id = i.section_id "
+            "WHERE s.template_id = :template_id) "
+            "ORDER BY item_id, display_order, id",
+            child_params,
+        ),
+        fetch(
+            "SELECT " + _OPTION_COLUMNS + " "
+            "FROM public.comment_options WHERE comment_id IN "
+            "(SELECT c.id FROM public.comments c "
+            "JOIN public.items i ON i.id = c.item_id "
+            "JOIN public.sections s ON s.id = i.section_id "
+            "WHERE s.template_id = :template_id) "
+            "ORDER BY comment_id, display_order",
+            child_params,
+        ),
+    ]
     if include_issues:
-        issue_rows = (
-            await conn.execute(
-                text(
-                    "SELECT " + _ISSUE_COLUMNS + " "
-                    "FROM public.import_issues "
-                    "WHERE template_id = :template_id "
-                    "AND EXISTS (SELECT 1 FROM public.templates t "
-                    "WHERE t.id = import_issues.template_id AND t.owner_id = :owner_id) "
-                    "ORDER BY created_at DESC, id DESC"
-                ),
+        pending.append(
+            fetch(
+                "SELECT " + _ISSUE_COLUMNS + " "
+                "FROM public.import_issues "
+                "WHERE template_id = :template_id "
+                "AND EXISTS (SELECT 1 FROM public.templates t "
+                "WHERE t.id = import_issues.template_id AND t.owner_id = :owner_id) "
+                "ORDER BY created_at DESC, id DESC",
                 {"template_id": template_id, "owner_id": owner_id},
             )
-        ).all()
-        issues = [
-            ImportIssue(
-                id=row.id,
-                source_row=row.source_row,
-                source_field=row.source_field,
-                issue_type=IssueType(row.issue_type),
-                message=row.message,
-                raw_value=row.raw_value,
-                severity=IssueSeverity(row.severity),
-            )
-            for row in issue_rows
-        ]
+        )
+
+    fetched = await asyncio.gather(*pending)
+    section_rows, item_rows, comment_rows, option_rows = fetched[:4]
+    issue_rows = fetched[4] if include_issues else []
+
+    issues: list[ImportIssue] = [
+        ImportIssue(
+            id=row.id,
+            source_row=row.source_row,
+            source_field=row.source_field,
+            issue_type=IssueType(row.issue_type),
+            message=row.message,
+            raw_value=row.raw_value,
+            severity=IssueSeverity(row.severity),
+        )
+        for row in issue_rows
+    ]
+
+    section_ids = [row.id for row in section_rows]
+    item_ids = [row.id for row in item_rows]
+    comment_ids = [row.id for row in comment_rows]
 
     options_by_comment: dict[uuid.UUID, list[CommentOption]] = {
         comment_id: [] for comment_id in comment_ids

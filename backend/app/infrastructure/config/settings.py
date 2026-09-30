@@ -35,6 +35,14 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/hive_inspect"
 
+    # Non-owner PostgreSQL role that request transactions assume (SET LOCAL ROLE) so the
+    # auth.uid()-keyed RLS policies from 0002 bind instead of being bypassed by the table
+    # owner; the acting user's claims are published alongside it. Created by
+    # database/migrations/0003_rls_enforcement.sql. Set empty to disable, which is only
+    # correct where 0002 is a no-op (plain PostgreSQL with no `auth` schema) and the
+    # application layer's owner_id predicates are the sole enforcement point.
+    db_app_role: str = "hive_app"
+
     # Supabase Auth (production). SUPABASE_JWT_SECRET signs the access tokens the API
     # validates; it is required whenever APP_ENV=production (the provider fails closed).
     supabase_jwt_secret: str | None = None

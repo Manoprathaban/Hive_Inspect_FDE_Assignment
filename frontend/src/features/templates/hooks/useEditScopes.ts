@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { useMutation, useQueryStore } from '../../../lib/query'
 import type { QueryKey } from '../../../lib/query'
 import type { Template } from '../types'
@@ -77,10 +78,31 @@ export function useEditScopes(templateId: string): EditScopesValue {
 
   const lastError = renameSection.error ?? renameItem.error ?? editComment.error
 
+  // Stable identities: these are passed through memo()'d SectionView/ItemView/CommentView
+  // components, so a fresh closure per render would re-render all 392 comment rows on any
+  // unrelated state change. `run` is useCallback(..., []) inside useMutation, so it is
+  // referentially stable and safe to depend on.
+  const { run: runRenameSection } = renameSection
+  const { run: runRenameItem } = renameItem
+  const { run: runEditComment } = editComment
+
+  const doRenameSection = useCallback(
+    (sectionId: string, name: string) => runRenameSection({ sectionId, name }),
+    [runRenameSection],
+  )
+  const doRenameItem = useCallback(
+    (itemId: string, name: string) => runRenameItem({ itemId, name }),
+    [runRenameItem],
+  )
+  const doEditComment = useCallback(
+    (commentId: string, content: string) => runEditComment({ commentId, content }),
+    [runEditComment],
+  )
+
   return {
-    renameSection: (sectionId, name) => renameSection.run({ sectionId, name }),
-    renameItem: (itemId, name) => renameItem.run({ itemId, name }),
-    editComment: (commentId, content) => editComment.run({ commentId, content }),
+    renameSection: doRenameSection,
+    renameItem: doRenameItem,
+    editComment: doEditComment,
     isPending: renameSection.isPending || renameItem.isPending || editComment.isPending,
     lastError,
   }

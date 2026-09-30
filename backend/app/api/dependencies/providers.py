@@ -19,6 +19,7 @@ from fastapi import Depends
 from app.adapters.importers.spectora_xlsx import SpectoraXlsxImporter
 from app.adapters.repositories.postgres import PostgresTemplateRepository
 from app.application.use_cases.import_template import ImportTemplateUseCase
+from app.infrastructure.config.settings import get_settings
 from app.infrastructure.database import get_async_engine
 from app.protocols.importers.template_importer import TemplateImporter
 from app.protocols.repositories.template_repository import TemplateRepository
@@ -29,7 +30,11 @@ __all__ = [
     "get_template_repository",
 ]
 
-_repository = PostgresTemplateRepository(get_async_engine())
+# Bound with the non-owner role from 0003 so the 0002 RLS policies actually filter these
+# statements; without it the connection owns the tables and the policies never apply.
+_repository = PostgresTemplateRepository(
+    get_async_engine(), app_role=get_settings().db_app_role or None
+)
 
 
 def get_template_importer() -> TemplateImporter:

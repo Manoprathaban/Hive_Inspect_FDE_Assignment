@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { describeError, isNotFoundError } from '../../../lib/errors'
 import type { ImportIssue, Template } from '../types'
@@ -13,6 +13,10 @@ import { ErrorState } from '../components/states/ErrorState'
 interface ViewLocationState {
   importIssues?: ImportIssue[]
 }
+
+/** Stable empty array: a fresh `?? []` literal each render would break memo() on the
+ *  viewer subtree for as long as the issues query has no data. */
+const NO_ISSUES: ImportIssue[] = []
 
 /** /templates/:templateId — viewer + inline editor + duplicate + issues (§11/§13/§15). */
 export function TemplateViewPage() {
@@ -30,6 +34,12 @@ export function TemplateViewPage() {
   const edits = useEditScopes(templateId ?? '')
   const navigationState = location.state as ViewLocationState | null
   const bannerIssues = navigationState?.importIssues ?? null
+
+  // Declared before the early returns (hooks must run unconditionally) and kept stable so
+  // the memo()'d TemplateViewer subtree is not re-rendered by unrelated state changes.
+  const toggleIssues = useCallback(() => setIssuesOpen((open) => !open), [])
+  const dismissBanner = useCallback(() => setBannerDismissed(true), [])
+  const openDuplicate = useCallback(() => setDuplicateOpen(true), [])
 
   if (isLoading) return <LoadingState label="Loading template" variant="rows" count={6} />
 
@@ -67,13 +77,13 @@ export function TemplateViewPage() {
       </nav>
       <TemplateViewer
         template={current}
-        issues={issues.data ?? []}
+        issues={issues.data ?? NO_ISSUES}
         issuesLoading={issues.isLoading}
         issuesOpen={issuesOpen}
-        onToggleIssues={() => setIssuesOpen((open) => !open)}
+        onToggleIssues={toggleIssues}
         banner={bannerDismissed ? null : bannerIssues}
-        onDismissBanner={() => setBannerDismissed(true)}
-        onDuplicate={() => setDuplicateOpen(true)}
+        onDismissBanner={dismissBanner}
+        onDuplicate={openDuplicate}
         onRenameSection={edits.renameSection}
         onRenameItem={edits.renameItem}
         onEditContent={edits.editComment}
