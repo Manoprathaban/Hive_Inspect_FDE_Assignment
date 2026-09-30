@@ -47,6 +47,7 @@ from app.domain.models.template import (
     Section,
     Template,
 )
+from app.infrastructure.database import owner_scoped_connection
 
 ADMIN_DSN = os.environ.get(
     "TEST_DATABASE_ADMIN_URL",
@@ -80,12 +81,34 @@ pytestmark = pytest.mark.skipif(
     reason="no reachable PostgreSQL server; set TEST_DATABASE_ADMIN_URL to enable",
 )
 
+# Minimal stand-in for the parts of a Supabase project the migrations key off: the `auth`
+# schema must exist for 0001 to attach its signup trigger and for 0002 to create its
+# `auth.uid()`-keyed policies at all. `auth.uid()` mirrors Supabase's own definition — it
+# reads the claims the application publishes per transaction — so these tests exercise the
+# real policies rather than a reimplementation of them.
+_AUTH_SCHEMA_STUB = """
+CREATE SCHEMA auth;
+CREATE TABLE auth.users (id uuid PRIMARY KEY);
+CREATE OR REPLACE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql STABLE AS $$
+    SELECT NULLIF(
+        COALESCE(
+            current_setting('request.jwt.claim.sub', true),
+            current_setting('request.jwt.claims', true)::jsonb ->> 'sub'
+        ),
+        ''
+    )::uuid
+$$;
+"""
+
+APP_ROLE = "hive_app"
+
 
 class _Harness:
     """Throwaway database with migrations applied; dropped on exit."""
 
-    def __init__(self, name: str | None = None) -> None:
+    def __init__(self, name: str | None = None, *, with_auth_schema: bool = False) -> None:
         self.name = name or f"hi_adapter_{uuid.uuid4().hex[:12]}"
+        self._with_auth_schema = with_auth_schema
         plain_base = ADMIN_DSN.rsplit("/", 1)[0]
         self._dsn = f"{plain_base}/{self.name}"
         self._engine_url = "postgresql+asyncpg://" + plain_base.split("://", 1)[1] + "/" + self.name
@@ -99,6 +122,8 @@ class _Harness:
         try:
             conn = await asyncpg.connect(self._dsn)
             try:
+                if self._with_auth_schema:
+                    await conn.execute(_AUTH_SCHEMA_STUB)
                 for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
                     await conn.execute(path.read_text(encoding="utf-8"))
                 await conn.execute(
@@ -109,7 +134,9 @@ class _Harness:
             finally:
                 await conn.close()
             self._engine: AsyncEngine = create_async_engine(self._engine_url)
-            return self._engine, PostgresTemplateRepository(self._engine)
+            return self._engine, PostgresTemplateRepository(
+                self._engine, app_role=APP_ROLE if self._with_auth_schema else None
+            )
         except BaseException:
             await self._drop()
             raise
@@ -472,5 +499,150 @@ def test_real_spectora_export_round_trips_through_adapter() -> None:
             assert sum(
                 len(item.comments) for section in copy.sections for item in section.items
             ) == sum(len(item.comments) for section in loaded.sections for item in section.items)
+
+    asyncio.run(scenario())
+
+
+# =============================================================================
+# Row Level Security enforcement (migration 0003)
+#
+# The tests above prove the adapter's own owner_id predicates. These prove the database
+# itself refuses cross-tenant access, by running statements that carry NO owner predicate
+# at all against a connection scoped to one user: anything filtered here was filtered by
+# the 0002 policies, not by the adapter.
+# =============================================================================
+
+
+def test_rls_hides_other_users_rows_from_an_unpredicated_query() -> None:
+    async def scenario() -> None:
+        async with _Harness(with_auth_schema=True) as (engine, repo):
+            mine = await repo.save(_rich_template(name="Mine"), owner_id=USER_A)
+            theirs = await repo.save(_rich_template(name="Theirs"), owner_id=USER_B)
+
+            async def visible(user_id: uuid.UUID, table: str) -> set[uuid.UUID]:
+                async with owner_scoped_connection(
+                    engine, owner_id=user_id, app_role=APP_ROLE
+                ) as conn:
+                    rows = await conn.execute(text(f"SELECT id FROM public.{table}"))
+                    return set(rows.scalars().all())
+
+            for table in ("templates", "sections", "items", "comments", "comment_options"):
+                as_a = await visible(USER_A, table)
+                as_b = await visible(USER_B, table)
+                assert as_a, f"USER_A should see their own {table}"
+                assert as_b, f"USER_B should see their own {table}"
+                assert as_a.isdisjoint(as_b), f"{table} leaked across users"
+
+            assert await visible(USER_A, "templates") == {mine.id}
+            assert await visible(USER_B, "templates") == {theirs.id}
+            assert {section.id for section in mine.sections} == await visible(USER_A, "sections")
+
+    asyncio.run(scenario())
+
+
+def test_rls_rejects_writing_a_row_owned_by_another_user() -> None:
+    async def scenario() -> None:
+        async with _Harness(with_auth_schema=True) as (engine, _repo):
+            async with owner_scoped_connection(engine, owner_id=USER_A, app_role=APP_ROLE) as conn:
+                with pytest.raises(Exception) as excinfo:
+                    await conn.execute(
+                        text(
+                            "INSERT INTO public.templates (owner_id, name, source) "
+                            "VALUES (:owner, 'Forged', 'spectora')"
+                        ),
+                        {"owner": USER_B},
+                    )
+            assert "row-level security" in str(excinfo.value).lower()
+
+            # The connection is still usable and still scoped to USER_A afterwards.
+            async with owner_scoped_connection(engine, owner_id=USER_A, app_role=APP_ROLE) as conn:
+                count = await conn.execute(text("SELECT count(*) FROM public.templates"))
+                assert count.scalar_one() == 0
+
+    asyncio.run(scenario())
+
+
+def test_rls_identity_does_not_survive_the_transaction_on_a_pooled_connection() -> None:
+    """A pooled connection must not carry one user's identity into the next request.
+
+    Both reads run back to back on the same engine, so the second is very likely served by
+    the connection the first just returned. ``SET LOCAL`` has to discard the identity at
+    COMMIT, otherwise user B would inherit user A's view of the data.
+    """
+
+    async def scenario() -> None:
+        async with _Harness(with_auth_schema=True) as (engine, repo):
+            mine = await repo.save(_rich_template(name="Mine"), owner_id=USER_A)
+            await repo.save(_rich_template(name="Theirs"), owner_id=USER_B)
+
+            async def names_for(user_id: uuid.UUID) -> set[str]:
+                async with owner_scoped_connection(
+                    engine, owner_id=user_id, app_role=APP_ROLE
+                ) as conn:
+                    rows = await conn.execute(text("SELECT name FROM public.templates"))
+                    return set(rows.scalars().all())
+
+            for _ in range(3):
+                assert await names_for(USER_A) == {"Mine"}
+                assert await names_for(USER_B) == {"Theirs"}
+
+            # The adapter path is scoped the same way.
+            assert (await repo.get(mine.id, owner_id=USER_B)) is None
+            assert [t.name for t in await repo.list_for_user(USER_B)] == ["Theirs"]
+
+    asyncio.run(scenario())
+
+
+def test_adapter_behaves_identically_with_rls_active() -> None:
+    """Enabling RLS must not change the adapter's contract, only add a second wall."""
+
+    async def scenario() -> None:
+        async with _Harness(with_auth_schema=True) as (_engine, repo):
+            saved = await repo.save(_rich_template(), owner_id=USER_A)
+
+            loaded = await repo.get(saved.id, owner_id=USER_A)
+            assert loaded is not None
+            assert loaded.sections and loaded.sections[0].items
+            assert loaded.sections[0].items[0].comments[0].options
+            assert len(loaded.issues) == 2
+
+            copy = await repo.duplicate(saved.id, owner_id=USER_A)
+            assert copy.name == "Sample (Copy)"
+
+            assert (
+                await repo.update_section_name(
+                    template_id=saved.id,
+                    section_id=loaded.sections[0].id,
+                    owner_id=USER_A,
+                    name="Renamed",
+                )
+                is None
+            )
+            assert (
+                await repo.update_item_name(
+                    template_id=saved.id,
+                    item_id=loaded.sections[0].items[0].id,
+                    owner_id=USER_A,
+                    name="Renamed item",
+                )
+                is None
+            )
+            assert (
+                await repo.update_comment_content(
+                    template_id=saved.id,
+                    comment_id=loaded.sections[0].items[0].comments[0].id,
+                    owner_id=USER_A,
+                    content="Updated",
+                )
+                is None
+            )
+
+            # Foreign access stays indistinguishable from missing.
+            assert await repo.get(saved.id, owner_id=USER_B) is None
+            assert await repo.list_for_user(USER_B) == []
+            assert await repo.list_import_issues(saved.id, owner_id=USER_B) == []
+            assert await repo.delete(saved.id, owner_id=USER_B) is False
+            with pytest.raises(TemplateNotFoundError):
+                await repo.duplicate(saved.id, owner_id=USER_B)
 
     asyncio.run(scenario())

@@ -62,6 +62,7 @@ from app.domain.models.template import (
     Template,
     TemplateSummary,
 )
+from app.infrastructure.database import owner_scoped_connection
 
 __all__ = ["PostgresTemplateRepository"]
 
@@ -79,11 +80,32 @@ _OPTION_COLUMNS = "id, comment_id, option_type, value, display_order"
 _ISSUE_COLUMNS = "id, source_row, source_field, issue_type, message, raw_value, severity"
 
 
+def _owner_connection(engine: AsyncEngine, *, owner_id: uuid.UUID, app_role: str | None) -> Any:
+    """Return a context manager yielding a transaction scoped to ``owner_id``.
+
+    With ``app_role`` set, the transaction assumes the non-owner role and publishes the
+    acting user's claims, so the 0002 RLS policies filter every statement in addition to the
+    ``owner_id`` predicates below. With ``app_role=None`` it is an ordinary transaction:
+    that is the path taken against plain PostgreSQL, where 0002 is a no-op because no
+    ``auth`` schema exists, and the predicates are the only enforcement point available.
+    """
+
+    if app_role is None:
+        return engine.begin()
+    return owner_scoped_connection(engine, owner_id=owner_id, app_role=app_role)
+
+
 class PostgresTemplateRepository:
     """Owner-scoped template persistence backed by PostgreSQL."""
 
-    def __init__(self, engine: AsyncEngine) -> None:
+    def __init__(self, engine: AsyncEngine, *, app_role: str | None = None) -> None:
         self._engine = engine
+        self._app_role = app_role
+
+    def _owner_connection(self, owner_id: uuid.UUID) -> Any:
+        """Return a context manager yielding an owner-scoped connection."""
+
+        return _owner_connection(self._engine, owner_id=owner_id, app_role=self._app_role)
 
     # ------------------------------------------------------------------
     # Writes
@@ -92,7 +114,7 @@ class PostgresTemplateRepository:
     async def save(self, template: Template, *, owner_id: uuid.UUID) -> Template:
         """Persist a new aggregate (with sections/items/comments/options/issues)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             template_id, created_at, updated_at = await _insert_template(
                 conn,
                 owner_id=owner_id,
@@ -129,12 +151,13 @@ class PostgresTemplateRepository:
     ) -> Template:
         """Create an independent deep copy (provenance, new ids, no issues)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             source = await _load_template(
                 conn,
                 template_id=template_id,
                 owner_id=owner_id,
                 include_issues=False,
+                app_role=self._app_role,
             )
             if source is None:
                 raise TemplateNotFoundError(template_id)
@@ -173,7 +196,7 @@ class PostgresTemplateRepository:
     ) -> None:
         """Rename an owned section (single-row, template timestamps untouched)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             await _check_template_owned(conn, template_id=template_id, owner_id=owner_id)
             result = await conn.execute(
                 text(
@@ -197,7 +220,7 @@ class PostgresTemplateRepository:
     ) -> None:
         """Rename an owned item (single-row, template timestamps untouched)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             await _check_template_owned(conn, template_id=template_id, owner_id=owner_id)
             result = await conn.execute(
                 text(
@@ -222,7 +245,7 @@ class PostgresTemplateRepository:
     ) -> None:
         """Replace an owned comment's content (single-row edit, verbatim)."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             await _check_template_owned(conn, template_id=template_id, owner_id=owner_id)
             result = await conn.execute(
                 text(
@@ -241,7 +264,7 @@ class PostgresTemplateRepository:
     async def delete(self, template_id: uuid.UUID, *, owner_id: uuid.UUID) -> bool:
         """Delete an owned template and its descendants; ``False`` when not owned."""
 
-        async with self._engine.begin() as conn:
+        async with self._owner_connection(owner_id) as conn:
             result = await conn.execute(
                 text(
                     "DELETE FROM public.templates WHERE id = :template_id AND owner_id = :owner_id"
@@ -257,18 +280,19 @@ class PostgresTemplateRepository:
     async def get(self, template_id: uuid.UUID, *, owner_id: uuid.UUID) -> Template | None:
         """Full hierarchy of an owned template; ``None`` when missing/foreign."""
 
-        async with self._engine.connect() as conn:
+        async with self._owner_connection(owner_id) as conn:
             return await _load_template(
                 conn,
                 template_id=template_id,
                 owner_id=owner_id,
                 include_issues=True,
+                app_role=self._app_role,
             )
 
     async def list_for_user(self, owner_id: uuid.UUID) -> list[TemplateSummary]:
         """Summaries of the acting user's templates, most recently updated first."""
 
-        async with self._engine.connect() as conn:
+        async with self._owner_connection(owner_id) as conn:
             rows = (
                 await conn.execute(
                     text(
@@ -296,7 +320,7 @@ class PostgresTemplateRepository:
     ) -> list[ImportIssue]:
         """An owned template's import issues, newest first; ``[]`` when missing/foreign."""
 
-        async with self._engine.connect() as conn:
+        async with self._owner_connection(owner_id) as conn:
             rows = (
                 await conn.execute(
                     text(
@@ -561,6 +585,7 @@ async def _load_template(
     template_id: uuid.UUID,
     owner_id: uuid.UUID,
     include_issues: bool,
+    app_role: str | None = None,
 ) -> Template | None:
     """Assemble an owned template's full hierarchy (and issues when requested).
 
@@ -573,6 +598,9 @@ async def _load_template(
     the assembly below are unchanged, so the aggregate is identical to the sequential
     version while paying one round-trip's latency instead of five. This needs spare
     connections in the pool, which is why the engine is built with a widened pool.
+
+    ``app_role`` is forwarded so the child reads run under the same RLS identity as the
+    parent read; see :func:`_owner_connection`.
     """
 
     template_row = (
@@ -589,8 +617,11 @@ async def _load_template(
 
     engine = conn.engine
 
+    # Each child read runs on its own pooled connection, so each one is scoped to the same
+    # acting user independently — without this the concurrent reads would run unscoped and
+    # RLS would filter them by a different (or missing) identity than the parent read.
     async def fetch(sql: str, params: dict[str, Any]) -> list[Any]:
-        async with engine.connect() as child_conn:
+        async with _owner_connection(engine, owner_id=owner_id, app_role=app_role) as child_conn:
             return (await child_conn.execute(text(sql), params)).all()
 
     child_params: dict[str, Any] = {"template_id": template_id}
