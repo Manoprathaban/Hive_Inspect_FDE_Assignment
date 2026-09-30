@@ -1,8 +1,10 @@
 -- =============================================================================
 -- dev_auth.sql — development-only identity seed.
 --
--- Complements the backend DevAuthProvider (app/adapters/authentication/dev.py),
--- which resolves requests to this same deterministic user id.
+-- Seeds ONLY the demo identity that DEV_AUTH_USERS maps `demo@hive.test` onto
+-- (backend/app/adapters/authentication/dev.py). The dev provider derives a stable
+-- per-credential id for any other email and creates its public.users row on first request,
+-- so those tenants need no seed here.
 --
 -- WARNING: development/testing only. Never apply this seed to a production
 -- Supabase database. In production, public.users rows are created automatically

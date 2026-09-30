@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     # application layer's owner_id predicates are the sole enforcement point.
     db_app_role: str = "hive_app"
 
+    # Development identities, as "email=user-id" pairs separated by commas. A development
+    # credential that matches one of these resolves to that id, which is how the seeded demo
+    # user (and its templates) stay reachable. Any other credential is hashed into its own
+    # stable id, so two development logins are never the same tenant. Development-only:
+    # APP_ENV=production uses SupabaseAuthProvider and ignores this.
+    dev_auth_users: str = "demo@hive.test=00000000-0000-0000-0000-000000000001"
+
     # Supabase Auth (production). SUPABASE_JWT_SECRET signs the access tokens the API
     # validates; it is required whenever APP_ENV=production (the provider fails closed).
     supabase_jwt_secret: str | None = None

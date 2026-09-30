@@ -15,6 +15,10 @@ interface LocationState {
   from?: string
 }
 
+// The seeded development identity. Must match DEV_AUTH_USERS in backend/.env, which maps
+// this email onto the user id that owns the seeded templates.
+const DEMO_EMAIL = 'demo@hive.test'
+
 export function LoginPage() {
   const { session, isInitializing, isDevMode, login, signup } = useSession()
   const machine = useLoginMachine('signin')
@@ -75,9 +79,9 @@ export function LoginPage() {
     machine.submit()
     try {
       if (isSignUp) {
-        await signup('dev@example.com', 'devpass')
+        await signup(DEMO_EMAIL, 'devpass')
       } else {
-        await login('dev@example.com', '')
+        await login(DEMO_EMAIL, '')
       }
       machine.succeed()
       navigate(destination, { replace: true })
@@ -122,29 +126,15 @@ export function LoginPage() {
           </button>
         </div>
 
-        {isDevMode ? (
-          <div className="dev-login">
-            <p className="dev-note">
-              Development mode — Supabase Auth is not configured. Continue with the demo
-              session to exercise the UI against the dev backend.
-            </p>
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={handleDevLogin}
-              disabled={machine.state.phase === 'submitting'}
-            >
-              {machine.state.phase === 'submitting'
-                ? isSignUp
-                  ? 'Creating account…'
-                  : 'Signing in…'
-                : isSignUp
-                  ? 'Sign up as demo user'
-                  : 'Continue as demo user'}
-            </button>
-          </div>
-        ) : (
-          <form onSubmit={handleSubmit} className="login-form">
+        {isDevMode && (
+          <p className="dev-note">
+            Development mode — Supabase Auth is not configured. Every email is its own
+            workspace, so you only ever see what you import yourself. Sign in as
+            demo@hive.test for the seeded templates.
+          </p>
+        )}
+
+        <form onSubmit={handleSubmit} className="login-form">
             <label htmlFor="auth-email">Email</label>
             <input
               id="auth-email"
@@ -202,7 +192,17 @@ export function LoginPage() {
                   ? 'Sign Up'
                   : 'Sign In'}
             </button>
-          </form>
+        </form>
+
+        {isDevMode && (
+          <button
+            type="button"
+            className="button button--primary"
+            onClick={handleDevLogin}
+            disabled={machine.state.phase === 'submitting'}
+          >
+            Continue as demo user
+          </button>
         )}
 
         <div className="auth-footer">

@@ -102,12 +102,22 @@ Application use case / repository (authorization scoping)
 
 ### Development
 
-When the backend runs in `APP_ENV=development`, the existing `DevAuthProvider` resolves
-every request to a single deterministic user
-(`00000000-0000-0000-0000-000000000001`, seeded by `database/seed/dev_auth.sql`). The
-`Authorization` header stays required (a missing header is `401 AUTHENTICATION_REQUIRED`,
-exactly as in production) but in development its value is ignored — the caller is always
-the dev user.
+When the backend runs in `APP_ENV=development`, `DevAuthProvider` turns the presented
+credential into an identity, so different sign-ins are different tenants:
+
+- A real Supabase JWT is recognised and its `sub` claim is used (the signature is **not**
+  verified — that is `SupabaseAuthProvider`'s job), so a genuine signup that reaches a
+  development-configured backend keeps its own tenant.
+- A credential listed in `DEV_AUTH_USERS` resolves to that configured id. The default maps
+  `demo@hive.test` to `00000000-0000-0000-0000-000000000001` (seeded by
+  `database/seed/dev_auth.sql`), which is how the demo user keeps its templates.
+- Any other credential is hashed into a stable per-credential id, so the same credential
+  always means the same tenant and two credentials never collide. Its `public.users` row is
+  created on first use, mirroring what `on_auth_user_created` does in production.
+
+The `Authorization` header stays required (a missing header is `401 AUTHENTICATION_REQUIRED`,
+exactly as in production); a blank credential is `401 INVALID_TOKEN`. The frontend sends the
+entered email as `dev:<email>` and never the password.
 
 > The development path must never be reachable in production. The production path must
 > never accept an identity supplied by the client.

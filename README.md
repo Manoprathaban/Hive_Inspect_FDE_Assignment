@@ -74,9 +74,11 @@ backend URL (default `http://localhost:8000`, so the backend's default CORS orig
 `http://localhost:5173`, `http://localhost:4173`, `http://localhost:3000` — already allow
 the dev server and a production-build preview). No secrets live in frontend env vars.
 
-With no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` set, the app uses the deterministic
-development session (any credentials; requests carry the dev token the backend's
-`DevAuthProvider` accepts). Set both to sign in against real Supabase Auth.
+With no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` set, the app signs in against the
+development backend, which turns the email you type into a workspace: `demo@hive.test` (or
+the "Continue as demo user" button) reaches the seeded templates, and any other email starts
+an empty one. The password is never sent. Set both variables to sign in against real Supabase
+Auth instead.
 
 Quality gates (same commands CI runs):
 

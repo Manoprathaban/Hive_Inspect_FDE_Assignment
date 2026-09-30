@@ -42,7 +42,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SAMPLE_EXPORT = REPO_ROOT / "sample-data" / "sheet1.xml"
 
 BASE_URL = os.environ.get("LIVE_API_BASE_URL", "").rstrip("/")
-AUTH_HEADERS = {"Authorization": f"Bearer {os.environ.get('LIVE_API_TOKEN', 'dev-token')}"}
+AUTH_HEADERS = {"Authorization": f"Bearer {os.environ.get('LIVE_API_TOKEN', 'dev:demo@hive.test')}"}
 
 # The importer's own integration expectations for the committed export.
 EXPECTED_COUNTS = {"sections": 13, "items": 69, "comments": 392, "comment_options": 520}

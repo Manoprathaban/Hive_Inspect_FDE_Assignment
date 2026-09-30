@@ -221,10 +221,14 @@ provenance only and never dereferenced for data access.
 - **Production.** `SupabaseAuthProvider` (stub, `app/adapters/authentication/supabase.py`)
   validates the Supabase access token and returns the same `UserContext`. Wired in the
   auth/API step; fails closed until then.
-- **Development.** `DevAuthProvider` (`app/adapters/authentication/dev.py`) resolves every
-  request to deterministic id `00000000-0000-0000-0000-000000000001`, which is exactly the
-  row seeded by `database/seed/dev_auth.sql` — the stub maps to the same identity the
-  database can reference, without inventing a parallel user system.
+- **Development.** `DevAuthProvider` (`app/adapters/authentication/dev.py`) derives the
+  identity from the credential: a `DEV_AUTH_USERS` entry (default `demo@hive.test` →
+  `00000000-0000-0000-0000-000000000001`, the row seeded by `database/seed/dev_auth.sql`), a
+  real JWT's `sub`, or a stable per-credential id. A derived identity's `users` row is
+  created on first request (`ensure_user_row`), because nothing mirrors a synthesised
+  identity the way `on_auth_user_created` mirrors a real signup — without it every write
+  would fail the `templates.owner_id` foreign key. Two different credentials are therefore
+  two different tenants, rather than everyone sharing the seeded demo user.
 - **Enforcement (two layers).**
   1. **Application/backend (primary).** The backend scopes every query by
      `owner_id = current UserContext.user_id`. The repository protocol

@@ -1,8 +1,9 @@
 /**
  * Auth state (:FRONTEND_DESIGN §7). Holds the session, exposes useSession(), keeps the
  * API client's token in sync, and clears the whole server-state cache on logout so no
- * data crosses users. When Supabase is not configured (dev), falls back to a
- * deterministic dev session exactly mirroring the production flow.
+ * data crosses users. When Supabase is not configured (dev), the entered email is sent as a
+ * `dev:` credential so each developer gets their own workspace instead of everyone sharing
+ * one seeded account.
  */
 
 /* eslint-disable react/only-export-components -- the provider and its useSession() hook
@@ -43,6 +44,18 @@ function buildClient() {
   return null
 }
 
+/**
+ * Build the bearer credential for a development sign-in.
+ *
+ * The email identifies the workspace, so it travels as `dev:<email>` and the backend maps it
+ * to a stable per-credential identity — a hard-coded token would hand every developer the
+ * same seeded templates. The password is deliberately not sent: without Supabase there is
+ * nothing to verify it against, and a bearer header is not the place for a secret.
+ */
+function devCredential(email: string): string {
+  return `dev:${email.trim().toLowerCase()}`
+}
+
 function AuthProvider({ children }: { children: ReactNode }) {
   // The Supabase client is built once and lives for the provider's lifetime.
   const [client] = useState(buildClient)
@@ -65,7 +78,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (email: string, password: string) => {
     if (!client) {
-      setState({ session: { accessToken: 'dev-token' }, isInitializing: false })
+      setState({ session: { accessToken: devCredential(email) }, isInitializing: false })
       return
     }
     const { data, error } = await client.auth.signInWithPassword({ email, password })
@@ -78,7 +91,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
   const signup = useCallback(
     async (email: string, password: string): Promise<SignupResult> => {
       if (!client) {
-        setState({ session: { accessToken: 'dev-token' }, isInitializing: false })
+        setState({ session: { accessToken: devCredential(email) }, isInitializing: false })
         return { sessionCreated: true }
       }
       const { data, error } = await client.auth.signUp({ email, password })

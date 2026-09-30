@@ -11,12 +11,15 @@ from __future__ import annotations
 import asyncio
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 import pytest
+from fastapi import Depends
 from fastapi.testclient import TestClient
 
 from app.adapters.authentication.dev import DEV_USER_ID
 from app.adapters.repositories.in_memory import InMemoryTemplateRepository
+from app.api.dependencies.auth import provision_identity, resolve_current_user
 from app.api.dependencies.providers import get_template_repository
 from app.domain.models.template import (
     Comment,
@@ -27,19 +30,39 @@ from app.domain.models.template import (
     Section,
     Template,
 )
+from app.domain.models.user import UserContext
 from app.main import app
 
 client = TestClient(app)
 
-AUTH = {"Authorization": "Bearer dev-token"}
+AUTH = {"Authorization": "Bearer dev:demo@hive.test"}
 OTHER = uuid.UUID("00000000-0000-0000-0000-000000000002")
 REPO_ROOT = Path(__file__).resolve().parents[2]
+
+
+@pytest.fixture(autouse=True)
+def _skip_identity_provisioning() -> None:
+    """Disable identity provisioning for every test in this module.
+
+    It writes to a real database and these tests stub the repository instead, so without
+    this the auth path would open a connection against DATABASE_URL.
+    """
+
+    client.app.dependency_overrides[provision_identity] = _skip_provisioning
 
 
 @pytest.fixture(autouse=True)
 def _clear_dependency_overrides() -> None:
     yield
     client.app.dependency_overrides.clear()
+
+
+async def _skip_provisioning(
+    user: Annotated[UserContext, Depends(resolve_current_user)],
+) -> UserContext:
+    """These tests stub the repository, so identity provisioning has nothing to write to."""
+
+    return user
 
 
 def _stub() -> InMemoryTemplateRepository:
