@@ -52,7 +52,11 @@ function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     if (client) {
-      await client.auth.signOut()
+      try {
+        await client.auth.signOut()
+      } catch {
+        // Ignore Supabase logout errors (e.g. 403 on expired sessions) so local state clears
+      }
     }
     setAuthToken(null)
     store.clearAll()

@@ -6,6 +6,9 @@ sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
 python-multipart==0.0.20
 PyJWT==2.10.1
+# Required by PyJWT for asymmetric (ES256/RS256) signature verification against the
+# Supabase JWKS endpoint, and imported directly by the ES256 auth test.
+cryptography==49.0.0
 
 pytest==8.3.4
 httpx==0.28.1
