@@ -1,6 +1,7 @@
 import './App.css'
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import AuthProvider, { useSession } from './features/auth/AuthProvider'
+import { LogOutButton } from './features/auth/LogOutButton'
 import { LoginPage } from './features/auth/pages/LoginPage'
 import { TemplatesListPage } from './features/templates/pages/TemplatesListPage'
 import { TemplateViewPage } from './features/templates/pages/TemplateViewPage'
@@ -31,11 +32,23 @@ function DevBadge() {
   return <div className="dev-badge">development session</div>
 }
 
+/** App-level chrome, visible on every authenticated route rather than one page (§7). */
+function AppBar() {
+  const { session } = useSession()
+  if (!session) return null
+  return (
+    <div className="app-bar">
+      <LogOutButton />
+    </div>
+  )
+}
+
 function AppShell() {
   return (
     <BrowserRouter>
       <div className="app">
         <DevBadge />
+        <AppBar />
         <Routes>
           <Route path="/" element={<RootRedirect />} />
           <Route path="/login" element={<LoginPage />} />
