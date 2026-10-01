@@ -371,6 +371,102 @@ one thing that would have cost real marks, so it is worth recording what was che
   (`.gitignore`); no `__pycache__`/`.pytest_cache`/`.ruff_cache` is tracked; no `.env` is
   tracked.
 
+## 2026-09-30 — Sign-in, logout and deployment fixes
+
+- **Real sign-in had never worked against the live database.** Newer Supabase projects sign
+  their tokens with RS256 (older ones ES256) rather than the HS256 the backend expected, so
+  every genuine sign-in was rejected. The auth provider now handles both, reading the
+  project's public keys, and `SUPABASE_JWT_SECRET` is only required for the old symmetric
+  setup. This also surfaced a missing dependency — verifying an RS256/ES256 signature needs
+  `cryptography`, which was not installed, so that path would have crashed on first use.
+- **Logout existed but nothing called it.** The only way out of a session was for an API call
+  to fail. Added a proper log-out button to the app shell, so it is available on every screen
+  rather than being tied to one page.
+- **Fixed the deployed frontend 404ing on refresh.** A hard refresh on a template page returned
+  "not found" because the static host had no route fallback for client-side paths. Added one.
+- CI is now running on GitHub's runners on every push and every pull request, not just locally.
+
+## 2026-09-30 — Made opening a template much faster
+
+This is the improvement I chose to spend the extra time on. An inspector opens a template they
+have tuned for four years and then works in it for an hour, so the cost of that hour is what
+this removes.
+
+- **The page was redoing all its work on every change.** Opening the issues panel, dismissing a
+  message, or saving an edit caused the viewer to rebuild all 392 comments from scratch,
+  because the components were handed freshly created callbacks each time and so never
+  recognised anything as unchanged. Fixed by keeping those callbacks stable. On the real
+  template the first load went from 723 ms to a 4 ms re-render when you interact with
+  something unrelated, and there is now a test that fails if that regresses.
+- **The backend asked the database five questions in a row** when loading a template, each one
+  waiting on the answer before it could ask the next, even though none of them actually
+  depended on each other. They now run at the same time. I diffed the responses before and
+  after against four real templates to confirm the output is byte-for-byte identical.
+- Widened the connection pool, since parallel reads need more than one spare connection.
+- No API change, and the frontend still refetches after a save rather than trusting its own
+  local copy.
+- The numbers above are measured locally. The remote database is too inconsistent between runs
+  to quote an honest end-to-end figure, so I did not.
+
+## 2026-09-30 — Made the tenant separation real
+
+- **The row-level security in the database was not actually protecting anything.** I had
+  written the policies, but PostgreSQL does not apply them to the user that owns the tables —
+  and that is how the backend was connecting. So all seven policies were sitting there doing
+  nothing, and nothing failed to warn me, because the application code was separately checking
+  ownership on every query. A single mistake in that code would have exposed every customer's
+  templates with no error anywhere. I found this while verifying the live database rather than
+  by reading the code, which is the only reason it came out at all.
+- **The fix was to give the backend its own restricted database role** that does not own
+  anything, so the policies apply to it, and to tell the database who the current user is
+  inside the request's own transaction. Because that is transaction-scoped, a reused
+  connection cannot carry one customer's identity into the next request — there is a test for
+  exactly that failure.
+- Checked against the live database: the owner sees their 14 templates, another identity sees
+  none, and trying to insert a row claiming someone else's ownership is refused by the
+  database itself. Nothing in the live data was changed by this check.
+- One thing worth knowing if you deploy this elsewhere: the new role comes from a migration,
+  so it has to be applied before running the updated backend. It is already applied on the live
+  project.
+
+## 2026-09-30 — Fixed development sign-in sharing one account
+
+- **Found while checking the work above: signing in with different credentials showed the same
+  templates every time.** The development sign-in ignored whatever you typed and always
+  returned the same seeded user, and the frontend only ever sent a fixed placeholder, so there
+  was no way to enter a different account at all.
+- **Now each set of credentials gets its own workspace.** The account is derived from the
+  credential, so it is stable across restarts and two accounts can never collide. `demo@hive.test`
+  still opens the seeded template; any other email starts empty. A real Supabase token is now
+  also respected rather than thrown away, and a new account gets its user row created on first
+  request so saving works straight away.
+- Confirmed on the live database: the demo account sees the seeded template, two fresh accounts
+  see nothing, and one account trying to open another's template gets a plain "not found" —
+  the same response as a template that does not exist.
+- No database change needed for this one.
+
+## 2026-09-30 — The live app
+
+Deployed and checked against the real hosts rather than localhost:
+
+| | |
+| --- | --- |
+| App | https://hive-inspect-fde-assignment.vercel.app |
+| API | https://hive-inspect-fde-assignment.onrender.com |
+
+- **The seeded template had gone missing from the live database**, so the live app opened on an
+  empty screen — the one thing a reviewer is meant to be able to see immediately. Re-imported it
+  through the same code path an upload uses and confirmed through the public API that it reads
+  13 sections / 69 items / 392 comments / 520 options, matching the original export exactly.
+- Confirmed on the deployed backend: health check passes, the browser's cross-origin checks
+  pass from the Vercel address, a request without a session is rejected, and one account
+  cannot read another's template.
+- **Signing in:** use `demo@hive.test` to open the seeded template. Any other email can be
+  registered normally and gets its own empty workspace, so it is easy to show the separation
+  between two accounts.
+- One leftover test template belonging to another account is still in the database; harmless,
+  and I left it rather than deleting data.
+
 ## Supported input and known limitations
 
 - **Supported input:** the Spectora "Export HTML Text" (SpreadsheetML worksheet) format
@@ -402,12 +498,12 @@ one thing that would have cost real marks, so it is worth recording what was che
   baseline "Edit" requirement. Rich structural editing (reordering, adding items) was cut as
   a non-technical inspector's real need being better served by making import trustworthy
   first.
-- **Playwright/browser E2E.** Cut deliberately: the same flows are covered by 67 component
+- **Playwright/browser E2E.** Cut deliberately: the same flows are covered by 79 frontend
   tests plus the live HTTP/CORS suite in `backend/tests/test_live_api_integration.py`, and
   browser automation was a better use of the remaining time than more polish.
-- **Hosted CI execution and the deployed URL.** The workflow is written and every command it
-  runs passes locally, but opening a PR and deploying to Vercel/Render need the accounts;
-  both are recorded as CHECK BLOCKED rather than claimed as done.
+- **Template delete through the API.** The API contract has no delete route, so deleting a
+  template someone uploaded is not possible from the app today. That is a real gap for the
+  customer, and leaving it out was a scope decision rather than something I forgot.
 
 ## Credits
 
@@ -421,10 +517,19 @@ one thing that would have cost real marks, so it is worth recording what was che
 
 ## Time spent
 
-Roughly two focused days, matching the assignment's estimate, spent in the documented phase
-order: schema and migrations, backend domain/application, REST API, frontend, live-stack
-integration, and CI. The largest single cost was import fidelity — the importer work and the
-preservation checks behind the 13/69/392/520 figures.
+Roughly two focused days for the baseline, matching the assignment's estimate: schema and
+migrations, backend domain and application, REST API, frontend, live-stack integration, and CI.
+The biggest single cost there was import fidelity — the importer itself and the checks behind
+the 13/69/392/520 figures.
+
+The 2026-09-30 work was extra, and about the same size again: getting real sign-in working,
+logout, the deployment fixes, then the template-load speed work, the database-level tenant
+separation, and the development sign-in fix.
+
+Of everything, the two security items are what I would keep first if there were no deadline.
+Both were found by checking the live deployment rather than by reading the code, and both had
+been invisible from inside the test suite precisely *because* the application layer was doing
+the right thing. That is the part I would most want to talk through in the walkthrough.
 
 ## Walkthrough outline
 
@@ -438,21 +543,30 @@ A script for the 8-10 minute video, in the order the assignment asks for:
    tools (OpenCode) were used throughout.
 4. **The data model** — templates → sections → items → comments → options, the column-driven
    mapping, and how preservation was checked against the committed export.
-5. **Decisions** — deterministic importer over AI, the editor scope cut, the trust-focused
-   improvement, and what was deliberately left out.
-6. **The hard part** — unrepresentable source columns surfacing as import issues rather than
-   being dropped, shown live, plus the invalid-upload failure case.
+5. **Decisions** — deterministic importer over AI, the editor scope cut, and the
+   template-load improvement tied to the customer's problem (an inspector spends an hour inside
+   one template, so re-rendering all 392 comments on every keystroke was the thing worth fixing),
+   plus what I deliberately left out.
+6. **The hard part** — I would use the tenant separation, because it is the thing that was
+   nearly shipped wrong without anyone noticing: the database's own security rules were present
+   but inert, and the only reason nothing broke is that the application code happened to check
+   the right thing everywhere. Show the fix and then open a second account to demonstrate that
+   one customer cannot see another's templates. In passing, mention that checking this is what
+   led me to the second bug — development sign-in sharing one account.
 7. **Hive feedback** — direct, specific, short.
 
-## Open questions
+## Still to do
 
-- Phase 6 CI work is done; what remains is the hosted side: open a PR so GitHub Actions
-  runs the new jobs, and validate a real deployment (`CORS_ORIGINS` for the Vercel origin,
-  `VITE_API_BASE_URL` against the deployed API) once hostnames exist.
-- Real Supabase Auth E2E is still pending the project's public anon key — see the Phase 5
-  entry for exactly what is needed.
-- Migration tooling preference: plain SQL files applied via `psql` (default, portable) vs.
-  a tool like Alembic/`supabase db push` — plain SQL chosen for now.
-- Deliberately out of scope until its phase: exposing template `delete` through the API
-  (the contract does not define a delete route; the repository's owner-scoped `delete`
-  exists for the database boundary and is covered by the live suite).
+- **Record the walkthrough video.** This is the one thing left to produce. The app is deployed
+  and seeded, and the outline above is ready to record against.
+- **Run the deployed backend in production mode.** It currently runs the development sign-in
+  path, so an arbitrary bearer string is accepted and treated as a new empty account rather
+  than being rejected. Nothing is exposed — each token gets its own account and an unknown one
+  sees no templates, which I checked on the live deployment — but it is not the strict
+  behaviour the code supports, so it should be switched before this is treated as a hardened
+  deployment. Worth fixing rather than documenting.
+- **Confirming the import against the original export byte-for-byte** is still not done.
+  Preservation is established by matching the hierarchy counts and the content, not a file
+  comparison.
+- I have verified both sign-in paths against the deployed API directly, but I have not yet
+  driven a full register-and-use round trip through the browser itself.

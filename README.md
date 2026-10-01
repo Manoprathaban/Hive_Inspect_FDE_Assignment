@@ -74,6 +74,11 @@ backend URL (default `http://localhost:8000`, so the backend's default CORS orig
 `http://localhost:5173`, `http://localhost:4173`, `http://localhost:3000` — already allow
 the dev server and a production-build preview). No secrets live in frontend env vars.
 
+The backend chooses its authentication provider from `APP_ENV`: `production` verifies Supabase
+JWTs (HS256/RS256/ES256) and fails closed, anything else uses the development provider. The two
+must agree — a development backend accepts a per-credential session that a production backend
+would reject.
+
 With no `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` set, the app signs in against the
 development backend, which turns the email you type into a workspace: `demo@hive.test` (or
 the "Continue as demo user" button) reaches the seeded templates, and any other email starts
@@ -94,19 +99,39 @@ npm run build
 Migrations and seeds live in `database/`. Migrations are plain SQL so they execute
 consistently on local PostgreSQL, Supabase, and CI. See `database/migrations/README.md`.
 
+Tenant isolation is enforced by Postgres row-level security, not only by the application. The
+API connects as a non-owner role (`hive_app`) and sets the request identity inside the
+transaction, so a pooled connection cannot leak one tenant's identity into the next request.
+Apply the migrations **in order** — `0003_rls_enforcement.sql` creates the role the API expects.
+Setting `DB_APP_ROLE=` (empty) disables this and is only correct for a plain PostgreSQL instance
+with no `auth` schema.
+
 ## Deployment
 
 - Frontend → Vercel
 - Backend  → Render (see `backend/Dockerfile` and `docs/deployment.md`)
 - Database → Supabase PostgreSQL
 
+## Live app
+
+| | URL |
+| --- | --- |
+| Frontend | https://hive-inspect-fde-assignment.vercel.app |
+| Backend API | https://hive-inspect-fde-assignment.onrender.com |
+| Database | Supabase PostgreSQL |
+
+It opens on the seeded Spectora InterNACHI template. Sign in with `demo@hive.test` to reach it,
+or sign up with any email to get your own empty tenant (each account is isolated by Postgres RLS).
+See `NOTES.md` for access details and known limitations.
+
 ## Phase
 
 Phases 1-6 are implemented: database schema/migrations, backend domain + application, the
 REST API from `docs/API-CONTRACTS.md`, the React frontend from `docs/FRONTEND_DESIGN.md`,
 live-stack integration against the deployed Supabase database, and CI mirroring the local
-quality gates. See `NOTES.md` for the phase-by-phase record, the cut list, and known
-limitations.
+quality gates. Tenant isolation is enforced in the database (`database/migrations/0003_rls_enforcement.sql`),
+not only in the application layer. See `NOTES.md` for the phase-by-phase record, the cut list,
+and known limitations.
 
 ## Seeding a template
 
