@@ -120,9 +120,6 @@ with no `auth` schema.
 | Backend API | https://hive-inspect-fde-assignment.onrender.com |
 | Database | Supabase PostgreSQL |
 
-It opens on the seeded Spectora InterNACHI template. Sign in with `demo@hive.test` to reach it,
-or sign up with any email to get your own empty tenant (each account is isolated by Postgres RLS).
-See `NOTES.md` for access details and known limitations.
 
 ## Phase
 
