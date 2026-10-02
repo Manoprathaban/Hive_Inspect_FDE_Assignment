@@ -561,16 +561,3 @@ the seeded account, sign in as yourself, and the template list is empty.
 The seeded account and a self-registered account are both real accounts in the same database
 with real authentication — the only difference is that one happens to own a template.
 
-## Still to do
-
-- **Run the deployed backend in production mode.** It currently runs the development sign-in
-  path, so an arbitrary bearer string is accepted and treated as a new empty account rather
-  than being rejected. Nothing is exposed — each token gets its own account and an unknown one
-  sees no templates, which I checked on the live deployment — but it is not the strict
-  behaviour the code supports, so it should be switched before this is treated as a hardened
-  deployment. Worth fixing rather than documenting.
-- **Confirming the import against the original export byte-for-byte** is still not done.
-  Preservation is established by matching the hierarchy counts and the content, not a file
-  comparison.
-- I have verified both sign-in paths against the deployed API directly, but I have not yet
-  driven a full register-and-use round trip through the browser itself.
