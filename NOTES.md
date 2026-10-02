@@ -531,34 +531,38 @@ Both were found by checking the live deployment rather than by reading the code,
 been invisible from inside the test suite precisely *because* the application layer was doing
 the right thing. That is the part I would most want to talk through in the walkthrough.
 
-## Walkthrough outline
+## Where to look
 
-A script for the 8-10 minute video, in the order the assignment asks for:
+| | |
+|---|---|
+| Live app | https://hive-inspect-fde-assignment.vercel.app/login |
+| Walkthrough video | https://drive.google.com/file/d/1pHVY5zA0TZTlQdJlGg8K6hMUIdJKkY78/view?usp=sharing |
 
-1. **Intro** — who I am and what I built.
-2. **The workflow, on camera** — upload `sample-data/sheet1.xml`, show the template open
-   with its issues visible, rename a section and show it persisted, duplicate it and edit
-   the copy to show the original is untouched.
-3. **The repo** — monorepo layout, stack, the Lovable-assisted frontend, and that AI coding
-   tools (OpenCode) were used throughout.
-4. **The data model** — templates → sections → items → comments → options, the column-driven
-   mapping, and how preservation was checked against the committed export.
-5. **Decisions** — deterministic importer over AI, the editor scope cut, and the
-   template-load improvement tied to the customer's problem (an inspector spends an hour inside
-   one template, so re-rendering all 392 comments on every keystroke was the thing worth fixing),
-   plus what I deliberately left out.
-6. **The hard part** — I would use the tenant separation, because it is the thing that was
-   nearly shipped wrong without anyone noticing: the database's own security rules were present
-   but inert, and the only reason nothing broke is that the application code happened to check
-   the right thing everywhere. Show the fix and then open a second account to demonstrate that
-   one customer cannot see another's templates. In passing, mention that checking this is what
-   led me to the second bug — development sign-in sharing one account.
-7. **Hive feedback** — direct, specific, short.
+### Signing in to the already imported template
+
+The seeded template already exists, so this account opens straight onto it:
+
+```
+email:    jaohnlahord@gmail.com
+password: Mano@2001
+```
+
+It lands on the InterNACHI Residential template I imported from the committed Spectora
+export: 13 sections, 69 items, 392 comments, and its 4 import issues. There is nothing to
+upload first — the point of seeding it was so the app opens with something to explore.
+
+### Seeing a separate account of your own
+
+Sign up with any other email address instead. Sign-up sends a verification mail; once you
+confirm it, the new account has its own empty tenant and cannot see the seeded template or
+any other account's data. That is the fastest way to see the separation working: log out of
+the seeded account, sign in as yourself, and the template list is empty.
+
+The seeded account and a self-registered account are both real accounts in the same database
+with real authentication — the only difference is that one happens to own a template.
 
 ## Still to do
 
-- **Record the walkthrough video.** This is the one thing left to produce. The app is deployed
-  and seeded, and the outline above is ready to record against.
 - **Run the deployed backend in production mode.** It currently runs the development sign-in
   path, so an arbitrary bearer string is accepted and treated as a new empty account rather
   than being rejected. Nothing is exposed — each token gets its own account and an unknown one
